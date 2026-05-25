@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Agenda Digital — Semillitas del Oriente
 
-## Getting Started
+Demo navegable de la plataforma de gestión y comunicación para el Centro
+Infantil "Semillitas del Oriente" (Servicio de Salud Metropolitano Oriente).
 
-First, run the development server:
+**Vive 100% en el navegador.** No hay servidor: Postgres corre dentro del
+browser vía WASM y todos los datos persisten en IndexedDB del visitante.
+Cada quien tiene su propia copia. El botón "Reset demo" reinicia el seed.
+
+## Stack
+
+- **Next.js 16** (App Router, Turbopack)
+- **React 19**
+- **Tailwind CSS 4** + **shadcn/ui**
+- **PGlite** — Postgres completo en WASM con persistencia IndexedDB
+- **@react-pdf/renderer** — generación de PDFs declarativa
+
+## Correrlo
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abrir [http://localhost:3000](http://localhost:3000). Primer arranque tarda
+un instante mientras se crea el schema y se aplica el seed en IndexedDB.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Qué tiene de interesante
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **9 pantallas funcionales** con SQL real (joins, agregaciones, `LISTEN/NOTIFY`)
+  contra una base PGlite local — no hay datos mockeados.
+- **Multi-jardín**: dos centros precargados. La directora regional
+  (super_admin) puede alternar entre ambos desde el header.
+- **Switcher de usuario**: probá el demo desde la mirada de la directora,
+  una educadora o un apoderado. Lo que ve cada rol cambia con los datos.
+- **Notificaciones vivas**: `pg_notify` propaga eventos entre componentes
+  sin polling. Mandá un mensaje y el badge del destinatario se actualiza
+  en tiempo real.
+- **Reportes PDF**: ficha del párvulo, asistencia mensual y lista de
+  apoderados generados desde los datos reales del centro activo. Queda
+  un historial en `reportes_generados`.
 
-## Learn More
+## Estructura
 
-To learn more about Next.js, take a look at the following resources:
+```
+app/
+  dashboard/           # pantallas autenticadas
+  login/               # selector de usuario para entrar al demo
+lib/
+  db/
+    schema.ts          # 21 tablas, 16 enums
+    client.ts          # PGlite singleton + IndexedDB
+    seed.ts            # datos iniciales
+    sesion-context.tsx # usuario + centro activos (global)
+    use-db-query.ts    # hook para reads
+    use-db-mutation.ts # hook para writes
+    use-db-listen.ts   # LISTEN/NOTIFY
+    repositories/      # capa de acceso por dominio
+  reports/             # documentos PDF declarativos
+  utils/               # helpers puros (fechas, formato)
+components/
+  dashboard/           # header, badges, popovers
+  ui/                  # shadcn primitives
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Reset del demo
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Botón refresh en el header. Borra el IndexedDB y re-aplica el seed.
+El usuario activo vuelve a ser Angélica Fica (directora de Semillitas).
 
-## Deploy on Vercel
+## Notas
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Esto es una **maqueta interactiva**. No hay autenticación real, todas las
+mutaciones quedan en el navegador del visitante y no hay sincronización
+entre dispositivos. Pensado para mostrar el alcance de la plataforma al
+cliente sin necesidad de infraestructura.

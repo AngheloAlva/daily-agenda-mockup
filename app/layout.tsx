@@ -11,7 +11,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Semillitas del Oriente — Agenda Digital",
+  title: {
+    default: "Semillitas del Oriente — Agenda Digital",
+    template: "%s · Semillitas del Oriente",
+  },
   description:
     "Plataforma de gestión y comunicación del Centro Infantil Semillitas del Oriente.",
 };
