@@ -22,96 +22,86 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import {
-  calcularEdad,
-  diasHastaCumple,
-  inicialesDe,
-  ninos,
-  salas,
-} from "@/lib/data/mock";
+import { calcularEdad, diasHastaCumple, inicialesDe } from "@/lib/utils/nino";
+import { useDbQuery } from "@/lib/db/use-db-query";
+import { listByCentro as listNinos, getConteoCuentas } from "@/lib/db/repositories/ninos";
+import { listByCentro as listSalas } from "@/lib/db/repositories/salas";
+import { useSesion } from "@/lib/db/sesion-context";
 
 const TODAS = "todas";
 
 export default function ParvulosPage() {
+  const { centroActivo, nowDemo } = useSesion();
+  const centroId = centroActivo.id;
+
+  const ninosQuery = useDbQuery((db) => listNinos(db, centroId), [centroId]);
+  const salasQuery = useDbQuery((db) => listSalas(db, centroId), [centroId]);
+  const conteoQuery = useDbQuery(
+    (db) => getConteoCuentas(db, centroId),
+    [centroId],
+  );
+
   const [busqueda, setBusqueda] = useState("");
   const [salaFiltro, setSalaFiltro] = useState<string>(TODAS);
+
+  const ninos = ninosQuery.data ?? [];
+  const salas = salasQuery.data ?? [];
+  const conteo = conteoQuery.data ?? { activos: 0, pendientes: 0 };
+  const totalMatriculados = conteo.activos + conteo.pendientes;
 
   const lista = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
     return ninos.filter((n) => {
-      const matchSala = salaFiltro === TODAS || n.sala === salaFiltro;
+      const matchSala = salaFiltro === TODAS || n.salaNombre === salaFiltro;
       const matchQ =
         !q ||
         `${n.nombre} ${n.apellido}`.toLowerCase().includes(q) ||
-        n.apoderado.toLowerCase().includes(q);
+        (n.apoderadoPrincipal?.toLowerCase().includes(q) ?? false);
       return matchSala && matchQ;
     });
-  }, [busqueda, salaFiltro]);
+  }, [busqueda, salaFiltro, ninos]);
 
-  const activos = ninos.filter((n) => n.estadoCuenta === "activo").length;
-  const pendientes = ninos.length - activos;
+  const cargando = ninosQuery.loading || salasQuery.loading;
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Encabezado */}
       <div>
         <h1 className="font-heading text-2xl font-semibold tracking-tight md:text-3xl">
           Párvulos
         </h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          Fichas completas de los {ninos.length} párvulos matriculados.
+          {cargando
+            ? "Cargando matrícula del centro…"
+            : `Fichas completas de los ${totalMatriculados} párvulos matriculados.`}
         </p>
       </div>
 
-      {/* Stats resumen */}
       <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardContent className="flex items-center gap-3 ">
-            <div className="bg-primary/10 text-primary flex size-11 items-center justify-center rounded-xl">
-              <RiUserSmileLine className="size-5" />
-            </div>
-            <div>
-              <p className="font-heading text-2xl font-semibold">
-                {ninos.length}
-              </p>
-              <p className="text-muted-foreground text-xs">
-                Párvulos matriculados
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 ">
-            <div className="flex size-11 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
-              <RiCheckLine className="size-5" />
-            </div>
-            <div>
-              <p className="font-heading text-2xl font-semibold">{activos}</p>
-              <p className="text-muted-foreground text-xs">
-                Apoderados con cuenta activa
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-3 ">
-            <div className="flex size-11 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
-              <RiTimeLine className="size-5" />
-            </div>
-            <div>
-              <p className="font-heading text-2xl font-semibold">
-                {pendientes}
-              </p>
-              <p className="text-muted-foreground text-xs">
-                Cuentas pendientes de activación
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <StatCard
+          icon={<RiUserSmileLine className="size-5" />}
+          iconClass="bg-primary/10 text-primary"
+          valor={totalMatriculados}
+          label="Párvulos matriculados"
+          loading={conteoQuery.loading}
+        />
+        <StatCard
+          icon={<RiCheckLine className="size-5" />}
+          iconClass="bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
+          valor={conteo.activos}
+          label="Apoderados con cuenta activa"
+          loading={conteoQuery.loading}
+        />
+        <StatCard
+          icon={<RiTimeLine className="size-5" />}
+          iconClass="bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400"
+          valor={conteo.pendientes}
+          label="Cuentas pendientes de activación"
+          loading={conteoQuery.loading}
+        />
       </div>
 
-      {/* Filtros */}
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="relative flex-1">
           <RiSearchLine className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
@@ -137,8 +127,21 @@ export default function ParvulosPage() {
         </Select>
       </div>
 
-      {/* Grid de tarjetas */}
-      {lista.length === 0 ? (
+      {cargando ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="flex flex-col items-center gap-3 py-6">
+                <Skeleton className="size-20 rounded-full" />
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-5 w-24" />
+                <Skeleton className="h-12 w-full" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : lista.length === 0 ? (
         <Card>
           <CardContent className="text-muted-foreground flex flex-col items-center gap-2 p-12 text-center">
             <RiUserSmileLine className="size-10 opacity-40" />
@@ -150,8 +153,8 @@ export default function ParvulosPage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {lista.map((nino) => {
-            const edad = calcularEdad(nino.fechaNacimiento);
-            const dias = diasHastaCumple(nino.fechaNacimiento);
+            const edad = calcularEdad(nino.fechaNacimiento, nowDemo);
+            const dias = diasHastaCumple(nino.fechaNacimiento, nowDemo);
             const cumpleProximo = dias <= 14;
 
             return (
@@ -192,7 +195,7 @@ export default function ParvulosPage() {
                     </div>
 
                     <Badge variant="secondary" className="text-xs">
-                      {nino.sala}
+                      {nino.salaNombre}
                     </Badge>
 
                     <div className="bg-muted/40 w-full rounded-md px-3 py-2 text-left">
@@ -200,7 +203,7 @@ export default function ParvulosPage() {
                         Apoderado
                       </p>
                       <p className="truncate text-xs font-medium">
-                        {nino.apoderado}
+                        {nino.apoderadoPrincipal ?? "Sin asignar"}
                       </p>
                     </div>
 
@@ -236,5 +239,42 @@ export default function ParvulosPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function StatCard({
+  icon,
+  iconClass,
+  valor,
+  label,
+  loading,
+}: {
+  icon: React.ReactNode;
+  iconClass: string;
+  valor: number;
+  label: string;
+  loading: boolean;
+}) {
+  return (
+    <Card>
+      <CardContent className="flex items-center gap-3">
+        <div
+          className={cn(
+            "flex size-11 items-center justify-center rounded-xl",
+            iconClass,
+          )}
+        >
+          {icon}
+        </div>
+        <div>
+          {loading ? (
+            <Skeleton className="h-8 w-10" />
+          ) : (
+            <p className="font-heading text-2xl font-semibold">{valor}</p>
+          )}
+          <p className="text-muted-foreground text-xs">{label}</p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

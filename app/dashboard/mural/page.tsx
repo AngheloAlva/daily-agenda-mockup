@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
-import { format, formatDistanceToNow } from "date-fns";
+import { format, formatDistance } from "date-fns";
 import { es } from "date-fns/locale";
 import {
   RiAttachment2,
@@ -32,53 +32,79 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { useDbQuery } from "@/lib/db/use-db-query";
+import { useDbMutation } from "@/lib/db/use-db-mutation";
+import { useSesion } from "@/lib/db/sesion-context";
 import {
-  documentosInstitucionales,
-  publicaciones as publicacionesBase,
-  usuarioDemo,
-  type Adjunto,
-  type Publicacion,
-} from "@/lib/data/mock";
+  crear as crearPublicacion,
+  listFeed,
+  toggleLike,
+} from "@/lib/db/repositories/publicaciones";
+import { listByCentro as listDocumentos } from "@/lib/db/repositories/documentos";
+import type {
+  AdjuntoPub,
+  PublicacionFeed,
+  Usuario,
+} from "@/lib/db/types";
 
 export default function MuralPage() {
-  const [publicaciones, setPublicaciones] =
-    useState<Publicacion[]>(publicacionesBase);
+  const { usuario, centroActivo, nowDemo } = useSesion();
+  const usuarioId = usuario.id;
+  const centroId = centroActivo.id;
+
+  const publicacionesQuery = useDbQuery(
+    (db) => listFeed(db, centroId, usuarioId),
+    [centroId, usuarioId],
+  );
+
+  const documentosQuery = useDbQuery(
+    (db) => listDocumentos(db, centroId),
+    [centroId],
+  );
+
+  const toggleLikeMut = useDbMutation(
+    (db, args: { publicacionId: number; usuarioId: number }) =>
+      toggleLike(db, args.publicacionId, args.usuarioId),
+  );
+
+  const crearMut = useDbMutation(
+    (
+      db,
+      args: { centroId: number; autorId: number; titulo: string; contenido: string },
+    ) => crearPublicacion(db, args),
+  );
+
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [liked, setLiked] = useState<Record<number, boolean>>({});
 
-  const esDireccion = usuarioDemo.rol === "directora";
+  const publicaciones = publicacionesQuery.data ?? [];
+  const documentos = documentosQuery.data ?? [];
+  const esDireccion = usuario.rol === "directora";
 
-  const toggleLike = (id: number) => {
-    setLiked((prev) => ({ ...prev, [id]: !prev[id] }));
-    setPublicaciones((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, likes: p.likes + (liked[id] ? -1 : 1) } : p,
-      ),
-    );
+  const onToggleLike = async (publicacionId: number) => {
+    try {
+      await toggleLikeMut.mutate({ publicacionId, usuarioId });
+      publicacionesQuery.refetch();
+    } catch {
+      toast.error("No se pudo actualizar el like");
+    }
   };
 
-  const crearPublicacion = (titulo: string, contenido: string) => {
-    const nueva: Publicacion = {
-      id: Date.now(),
-      autorNombre: usuarioDemo.nombre,
-      autorRol: usuarioDemo.cargo,
-      autorIniciales: usuarioDemo.iniciales,
-      titulo,
-      contenido,
-      fecha: new Date().toISOString(),
-      likes: 0,
-      comentarios: 0,
-    };
-    setPublicaciones((prev) => [nueva, ...prev]);
-    toast.success("Publicación creada", { description: titulo });
+  const onCrear = async (titulo: string, contenido: string) => {
+    try {
+      await crearMut.mutate({ centroId, autorId: usuarioId, titulo, contenido });
+      publicacionesQuery.refetch();
+      toast.success("Publicación creada", { description: titulo });
+    } catch {
+      toast.error("No se pudo crear la publicación");
+    }
   };
 
   return (
     <>
       <div className="flex flex-col gap-6">
-        {/* Encabezado */}
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <h1 className="font-heading text-2xl font-semibold tracking-tight md:text-3xl">
@@ -96,7 +122,6 @@ export default function MuralPage() {
           )}
         </div>
 
-        {/* Documentos institucionales fijados */}
         <section>
           <div className="mb-3 flex items-center gap-2">
             <RiPushpinFill className="text-primary size-4" />
@@ -105,57 +130,69 @@ export default function MuralPage() {
             </h2>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {documentosInstitucionales.map((doc) => (
-              <Card
-                key={doc.id}
-                className="hover:border-primary/40 hover:shadow-md transition-all"
-              >
-                <CardContent className="flex items-start gap-3">
-                  <div className="bg-rose-100 text-rose-700 flex size-11 shrink-0 items-center justify-center rounded-xl dark:bg-rose-950/40 dark:text-rose-400">
-                    <RiFilePdfLine className="size-5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-sm font-semibold">
-                      {doc.titulo}
-                    </h3>
-                    <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">
-                      {doc.descripcion}
-                    </p>
-                    <div className="text-muted-foreground mt-2 flex items-center gap-2 text-[11px]">
-                      <span>{doc.tamano}</span>
-                      <span>·</span>
-                      <span>
-                        Actualizado{" "}
-                        {format(
-                          new Date(doc.fechaActualizacion),
-                          "d MMM yyyy",
-                          {
-                            locale: es,
-                          },
-                        )}
-                      </span>
-                    </div>
-                  </div>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="shrink-0"
-                    onClick={() =>
-                      toast.info(`Descargando ${doc.titulo}`, {
-                        description: `${doc.tamano}`,
-                      })
-                    }
-                    aria-label={`Descargar ${doc.titulo}`}
+            {documentosQuery.loading
+              ? Array.from({ length: 3 }).map((_, i) => (
+                  <Card key={i}>
+                    <CardContent className="flex items-start gap-3">
+                      <Skeleton className="size-11 rounded-xl" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-3 w-48" />
+                        <Skeleton className="h-3 w-24" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              : documentos.map((doc) => (
+                  <Card
+                    key={doc.id}
+                    className="hover:border-primary/40 hover:shadow-md transition-all"
                   >
-                    <RiDownloadLine className="size-4" />
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+                    <CardContent className="flex items-start gap-3">
+                      <div className="bg-rose-100 text-rose-700 flex size-11 shrink-0 items-center justify-center rounded-xl dark:bg-rose-950/40 dark:text-rose-400">
+                        <RiFilePdfLine className="size-5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="truncate text-sm font-semibold">
+                          {doc.titulo}
+                        </h3>
+                        {doc.descripcion && (
+                          <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">
+                            {doc.descripcion}
+                          </p>
+                        )}
+                        <div className="text-muted-foreground mt-2 flex items-center gap-2 text-[11px]">
+                          <span>{doc.tamano}</span>
+                          <span>·</span>
+                          <span>
+                            Actualizado{" "}
+                            {format(
+                              new Date(doc.fechaActualizacion),
+                              "d MMM yyyy",
+                              { locale: es },
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="shrink-0"
+                        onClick={() =>
+                          toast.info(`Descargando ${doc.titulo}`, {
+                            description: doc.tamano,
+                          })
+                        }
+                        aria-label={`Descargar ${doc.titulo}`}
+                      >
+                        <RiDownloadLine className="size-4" />
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))}
           </div>
         </section>
 
-        {/* Feed de publicaciones */}
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-wide">
@@ -167,14 +204,39 @@ export default function MuralPage() {
           </div>
 
           <div className="flex flex-col gap-4">
-            {publicaciones.map((pub) => (
-              <PublicacionCard
-                key={pub.id}
-                publicacion={pub}
-                liked={Boolean(liked[pub.id])}
-                onLike={() => toggleLike(pub.id)}
-              />
-            ))}
+            {publicacionesQuery.loading
+              ? Array.from({ length: 3 }).map((_, i) => (
+                  <Card key={i}>
+                    <CardHeader className="flex flex-row items-start gap-3 space-y-0">
+                      <Skeleton className="size-11 rounded-full" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-3 w-24" />
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <Skeleton className="h-5 w-2/3" />
+                      <Skeleton className="h-3 w-full" />
+                      <Skeleton className="h-3 w-3/4" />
+                    </CardContent>
+                  </Card>
+                ))
+              : publicaciones.length === 0
+                ? (
+                  <Card>
+                    <CardContent className="text-muted-foreground py-12 text-center text-sm">
+                      Sin publicaciones todavía
+                    </CardContent>
+                  </Card>
+                )
+                : publicaciones.map((pub) => (
+                    <PublicacionCard
+                      key={pub.id}
+                      publicacion={pub}
+                      nowDemo={nowDemo}
+                      onToggleLike={() => void onToggleLike(pub.id)}
+                    />
+                  ))}
           </div>
         </section>
       </div>
@@ -182,29 +244,29 @@ export default function MuralPage() {
       <NuevaPublicacionDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        onCrear={crearPublicacion}
+        usuario={usuario}
+        onCrear={onCrear}
+        creando={crearMut.loading}
       />
     </>
   );
 }
 
-/* ---------- Card de publicación ---------- */
-
 function PublicacionCard({
   publicacion,
-  liked,
-  onLike,
+  nowDemo,
+  onToggleLike,
 }: {
-  publicacion: Publicacion;
-  liked: boolean;
-  onLike: () => void;
+  publicacion: PublicacionFeed;
+  nowDemo: Date;
+  onToggleLike: () => void;
 }) {
   const fecha = new Date(publicacion.fecha);
 
   return (
     <Card
       className={cn(
-        "overflow-hidden ",
+        "overflow-hidden",
         publicacion.destacado && "ring-primary/20 pt-0 ring-2",
       )}
     >
@@ -234,7 +296,7 @@ function PublicacionCard({
               locale: es,
             })}
           >
-            {formatDistanceToNow(fecha, { locale: es, addSuffix: true })}
+            {formatDistance(fecha, nowDemo, { locale: es, addSuffix: true })}
           </p>
         </div>
         <Button
@@ -257,10 +319,10 @@ function PublicacionCard({
           </p>
         </div>
 
-        {publicacion.adjuntos && publicacion.adjuntos.length > 0 && (
+        {publicacion.adjuntos.length > 0 && (
           <div className="space-y-2">
             {publicacion.adjuntos.map((adj) => (
-              <AdjuntoItem key={adj.nombre} adjunto={adj} />
+              <AdjuntoItem key={adj.id} adjunto={adj} />
             ))}
           </div>
         )}
@@ -269,10 +331,12 @@ function PublicacionCard({
           <Button
             variant="ghost"
             size="sm"
-            className={cn("gap-1.5", liked && "text-rose-500")}
-            onClick={onLike}
+            className={cn("gap-1.5", publicacion.yoLike && "text-rose-500")}
+            onClick={onToggleLike}
           >
-            <RiHeartLine className={cn("size-4", liked && "fill-current")} />
+            <RiHeartLine
+              className={cn("size-4", publicacion.yoLike && "fill-current")}
+            />
             {publicacion.likes}
           </Button>
           <Button
@@ -303,9 +367,7 @@ function PublicacionCard({
   );
 }
 
-/* ---------- Item de adjunto ---------- */
-
-function AdjuntoItem({ adjunto }: { adjunto: Adjunto }) {
+function AdjuntoItem({ adjunto }: { adjunto: AdjuntoPub }) {
   const Icon = adjunto.tipo === "imagen" ? RiImageLine : RiFilePdfLine;
   const colorClass =
     adjunto.tipo === "imagen"
@@ -338,16 +400,18 @@ function AdjuntoItem({ adjunto }: { adjunto: Adjunto }) {
   );
 }
 
-/* ---------- Dialog nueva publicación ---------- */
-
 function NuevaPublicacionDialog({
   open,
   onOpenChange,
+  usuario,
   onCrear,
+  creando,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCrear: (titulo: string, contenido: string) => void;
+  usuario: Usuario | null | undefined;
+  onCrear: (titulo: string, contenido: string) => Promise<void> | void;
+  creando: boolean;
 }) {
   const uid = useId();
   const [titulo, setTitulo] = useState("");
@@ -360,12 +424,16 @@ function NuevaPublicacionDialog({
 
   const contadorContenido = useMemo(() => contenido.length, [contenido]);
 
-  const publicar = () => {
+  const iniciales = usuario
+    ? `${usuario.nombre[0] ?? ""}${usuario.apellido[0] ?? ""}`.toUpperCase()
+    : "??";
+
+  const publicar = async () => {
     if (!titulo.trim() || !contenido.trim()) {
       toast.error("Completa el título y el contenido");
       return;
     }
-    onCrear(titulo, contenido);
+    await onCrear(titulo, contenido);
     reset();
     onOpenChange(false);
   };
@@ -385,13 +453,17 @@ function NuevaPublicacionDialog({
           <div className="bg-muted/40 flex items-center gap-3 rounded-lg p-3">
             <Avatar className="size-9">
               <AvatarFallback className="bg-primary text-primary-foreground text-xs font-semibold">
-                {usuarioDemo.iniciales}
+                {iniciales}
               </AvatarFallback>
             </Avatar>
             <div>
-              <p className="text-sm font-medium">{usuarioDemo.nombre}</p>
+              <p className="text-sm font-medium">
+                {usuario ? `${usuario.nombre} ${usuario.apellido}` : "Usuario"}
+              </p>
               <p className="text-muted-foreground text-xs">
-                Publicando como {usuarioDemo.cargo}
+                {usuario?.cargo
+                  ? `Publicando como ${usuario.cargo}`
+                  : "Publicando…"}
               </p>
             </div>
           </div>
@@ -463,12 +535,17 @@ function NuevaPublicacionDialog({
               reset();
               onOpenChange(false);
             }}
+            disabled={creando}
           >
             Cancelar
           </Button>
-          <Button onClick={publicar} className="gap-1.5">
+          <Button
+            onClick={() => void publicar()}
+            className="gap-1.5"
+            disabled={creando}
+          >
             <RiSendPlaneFill className="size-4" />
-            Publicar
+            {creando ? "Publicando…" : "Publicar"}
           </Button>
         </DialogFooter>
       </DialogContent>

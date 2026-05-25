@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import {
   addMonths,
   eachDayOfInterval,
@@ -57,67 +57,145 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { tipoEventoConfig } from "@/lib/utils/eventos";
+import { useDbQuery } from "@/lib/db/use-db-query";
+import { useDbMutation } from "@/lib/db/use-db-mutation";
+import { useSesion } from "@/lib/db/sesion-context";
+import { listByCentro as listSalas } from "@/lib/db/repositories/salas";
 import {
-  eventos as eventosBase,
-  salas,
-  tipoEventoConfig,
-  type Evento,
-  type TipoEvento,
-} from "@/lib/data/mock";
+  crear as crearEvento,
+  listByRango,
+  listProximos,
+} from "@/lib/db/repositories/eventos";
+import type { Evento, TipoEvento } from "@/lib/db/types";
 
 const DIAS_SEMANA = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+const ISO = (d: Date) => format(d, "yyyy-MM-dd");
 
 export default function CalendarioPage() {
-  const [mesActual, setMesActual] = useState<Date>(new Date());
-  const [diaSeleccionado, setDiaSeleccionado] = useState<Date>(new Date());
-  const [eventos, setEventos] = useState<Evento[]>(eventosBase);
+  const { usuario, centroActivo, fechaHoyDemo } = useSesion();
+  const usuarioId = usuario.id;
+  const centroId = centroActivo.id;
+
+  const [mesActual, setMesActual] = useState<Date | null>(null);
+  const [diaSeleccionado, setDiaSeleccionado] = useState<Date | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const diasGrid = useMemo(() => {
+  // Inicializa el mes y el día seleccionado a la "fecha demo" (max asistencia)
+  useEffect(() => {
+    if (mesActual == null && fechaHoyDemo) {
+      const d = new Date(`${fechaHoyDemo}T00:00:00`);
+      setMesActual(d);
+      setDiaSeleccionado(d);
+    }
+  }, [mesActual, fechaHoyDemo]);
+
+  const fechaHoyIso = fechaHoyDemo;
+
+  // Rango visible = semanas completas que contienen al mesActual
+  const rango = useMemo(() => {
+    if (!mesActual) return null;
     const inicio = startOfWeek(startOfMonth(mesActual), { weekStartsOn: 1 });
     const fin = endOfWeek(endOfMonth(mesActual), { weekStartsOn: 1 });
-    return eachDayOfInterval({ start: inicio, end: fin });
+    return { inicio, fin };
   }, [mesActual]);
+
+  const diasGrid = useMemo(
+    () =>
+      rango
+        ? eachDayOfInterval({ start: rango.inicio, end: rango.fin })
+        : [],
+    [rango],
+  );
+
+  const eventosRangoQuery = useDbQuery(
+    async (db) =>
+      rango == null
+        ? []
+        : await listByRango(db, centroId, ISO(rango.inicio), ISO(rango.fin)),
+    [centroId, rango?.inicio.getTime(), rango?.fin.getTime()],
+  );
+
+  const proximosQuery = useDbQuery(
+    async (db) =>
+      fechaHoyIso == null
+        ? []
+        : await listProximos(db, centroId, fechaHoyIso, 5),
+    [centroId, fechaHoyIso],
+  );
+
+  const salasQuery = useDbQuery(
+    (db) => listSalas(db, centroId),
+    [centroId],
+  );
+
+  const crearMut = useDbMutation(
+    (
+      db,
+      args: Parameters<typeof crearEvento>[1],
+    ) => crearEvento(db, args),
+  );
+
+  const eventosRango = eventosRangoQuery.data ?? [];
+  const proximos = proximosQuery.data ?? [];
+  const salas = salasQuery.data ?? [];
 
   const eventosPorDia = useMemo(() => {
     const map = new Map<string, Evento[]>();
-    eventos.forEach((e) => {
-      const key = e.fecha;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(e);
-    });
+    for (const e of eventosRango) {
+      const lista = map.get(e.fecha) ?? [];
+      lista.push(e);
+      map.set(e.fecha, lista);
+    }
     return map;
-  }, [eventos]);
+  }, [eventosRango]);
 
   const getEventosDia = (date: Date): Evento[] =>
     eventosPorDia.get(format(date, "yyyy-MM-dd")) ?? [];
 
-  const eventosDelSeleccionado = getEventosDia(diaSeleccionado);
+  const eventosDelSeleccionado = diaSeleccionado
+    ? getEventosDia(diaSeleccionado)
+    : [];
 
-  const eventosProximos = useMemo(() => {
-    const hoy = startOfDay(new Date());
-    return [...eventos]
-      .filter(
-        (e) =>
-          e.tipo !== "feriado" &&
-          (isAfter(parseISO(e.fecha), hoy) ||
-            isSameDay(parseISO(e.fecha), hoy)),
-      )
-      .sort((a, b) => a.fecha.localeCompare(b.fecha))
-      .slice(0, 5);
-  }, [eventos]);
+  const cantidadEsteMes = mesActual
+    ? eventosRango.filter((e) =>
+        isSameMonth(parseISO(e.fecha), mesActual),
+      ).length
+    : 0;
 
-  const agregarEvento = (ev: Omit<Evento, "id">) => {
-    setEventos((prev) => [...prev, { ...ev, id: Date.now() }]);
-    toast.success("Evento creado", { description: ev.titulo });
+  const onCrearEvento = async (
+    payload: Omit<Parameters<typeof crearEvento>[1], "centroId" | "createdBy">,
+  ) => {
+    // sesion siempre lista aquí
+    try {
+      await crearMut.mutate({
+        centroId,
+        createdBy: usuarioId,
+        ...payload,
+      });
+      eventosRangoQuery.refetch();
+      proximosQuery.refetch();
+      toast.success("Evento creado", { description: payload.titulo });
+    } catch {
+      toast.error("No se pudo crear el evento");
+    }
   };
+
+  const irHoy = () => {
+    if (!fechaHoyIso) return;
+    const d = new Date(`${fechaHoyIso}T00:00:00`);
+    setMesActual(d);
+    setDiaSeleccionado(d);
+  };
+
+  const cargando = !mesActual;
 
   return (
     <>
       <div className="flex flex-col gap-6">
-        {/* Encabezado */}
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <h1 className="font-heading text-2xl font-semibold tracking-tight md:text-3xl">
@@ -127,43 +205,45 @@ export default function CalendarioPage() {
               Eventos institucionales, actividades y feriados del centro.
             </p>
           </div>
-          <Button onClick={() => setDialogOpen(true)} className="gap-2">
+          <Button
+            onClick={() => setDialogOpen(true)}
+            className="gap-2"
+            disabled={cargando}
+          >
             <RiAddLine className="size-4" />
             Nuevo evento
           </Button>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-          {/* Calendario mensual */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-2 border-b">
               <div>
                 <CardTitle className="font-heading text-xl capitalize">
-                  {format(mesActual, "MMMM yyyy", { locale: es })}
+                  {mesActual
+                    ? format(mesActual, "MMMM yyyy", { locale: es })
+                    : "Cargando…"}
                 </CardTitle>
                 <CardDescription>
-                  {eventos.filter((e) =>
-                    isSameMonth(parseISO(e.fecha), mesActual),
-                  ).length}{" "}
-                  eventos este mes
+                  {eventosRangoQuery.loading
+                    ? "Cargando eventos…"
+                    : `${cantidadEsteMes} eventos este mes`}
                 </CardDescription>
               </div>
               <div className="flex items-center gap-1">
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    const hoy = new Date();
-                    setMesActual(hoy);
-                    setDiaSeleccionado(hoy);
-                  }}
+                  onClick={irHoy}
+                  disabled={cargando}
                 >
                   Hoy
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setMesActual(subMonths(mesActual, 1))}
+                  onClick={() => mesActual && setMesActual(subMonths(mesActual, 1))}
+                  disabled={cargando}
                   aria-label="Mes anterior"
                 >
                   <RiArrowLeftSLine className="size-5" />
@@ -171,7 +251,8 @@ export default function CalendarioPage() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setMesActual(addMonths(mesActual, 1))}
+                  onClick={() => mesActual && setMesActual(addMonths(mesActual, 1))}
+                  disabled={cargando}
                   aria-label="Mes siguiente"
                 >
                   <RiArrowRightSLine className="size-5" />
@@ -180,7 +261,6 @@ export default function CalendarioPage() {
             </CardHeader>
 
             <CardContent className="p-3 md:p-4">
-              {/* Nombres de días */}
               <div className="mb-2 grid grid-cols-7 gap-1">
                 {DIAS_SEMANA.map((d) => (
                   <div
@@ -192,46 +272,55 @@ export default function CalendarioPage() {
                 ))}
               </div>
 
-              {/* Grid de días */}
-              <div className="grid grid-cols-7 gap-1">
-                {diasGrid.map((dia) => (
-                  <DiaCell
-                    key={dia.toISOString()}
-                    dia={dia}
-                    mesActual={mesActual}
-                    seleccionado={isSameDay(dia, diaSeleccionado)}
-                    eventos={getEventosDia(dia)}
-                    onClick={() => setDiaSeleccionado(dia)}
-                  />
-                ))}
-              </div>
+              {cargando ? (
+                <div className="grid grid-cols-7 gap-1">
+                  {Array.from({ length: 35 }).map((_, i) => (
+                    <Skeleton key={i} className="min-h-[72px] md:min-h-[92px]" />
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-7 gap-1">
+                  {diasGrid.map((dia) => (
+                    <DiaCell
+                      key={dia.toISOString()}
+                      dia={dia}
+                      mesActual={mesActual!}
+                      fechaHoyIso={fechaHoyIso ?? null}
+                      seleccionado={
+                        diaSeleccionado
+                          ? isSameDay(dia, diaSeleccionado)
+                          : false
+                      }
+                      eventos={getEventosDia(dia)}
+                      onClick={() => setDiaSeleccionado(dia)}
+                    />
+                  ))}
+                </div>
+              )}
 
-              {/* Leyenda */}
               <div className="mt-4 flex flex-wrap gap-3 border-t pt-3">
-                {(Object.keys(tipoEventoConfig) as TipoEvento[]).map(
-                  (tipo) => {
-                    const cfg = tipoEventoConfig[tipo];
-                    return (
-                      <div key={tipo} className="flex items-center gap-1.5">
-                        <span className={cn("size-2 rounded-full", cfg.dot)} />
-                        <span className="text-muted-foreground text-xs">
-                          {cfg.label}
-                        </span>
-                      </div>
-                    );
-                  },
-                )}
+                {(Object.keys(tipoEventoConfig) as TipoEvento[]).map((tipo) => {
+                  const cfg = tipoEventoConfig[tipo];
+                  return (
+                    <div key={tipo} className="flex items-center gap-1.5">
+                      <span className={cn("size-2 rounded-full", cfg.dot)} />
+                      <span className="text-muted-foreground text-xs">
+                        {cfg.label}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
 
-          {/* Panel lateral */}
           <div className="flex flex-col gap-4">
-            {/* Día seleccionado */}
             <Card>
               <CardHeader className="border-b">
                 <CardTitle className="font-heading text-base capitalize">
-                  {format(diaSeleccionado, "EEEE d 'de' MMMM", { locale: es })}
+                  {diaSeleccionado
+                    ? format(diaSeleccionado, "EEEE d 'de' MMMM", { locale: es })
+                    : "Día"}
                 </CardTitle>
                 <CardDescription>
                   {eventosDelSeleccionado.length === 0
@@ -255,7 +344,6 @@ export default function CalendarioPage() {
               </CardContent>
             </Card>
 
-            {/* Próximos eventos */}
             <Card>
               <CardHeader className="border-b">
                 <CardTitle className="font-heading text-base">
@@ -264,13 +352,19 @@ export default function CalendarioPage() {
                 <CardDescription>Sin contar feriados</CardDescription>
               </CardHeader>
               <CardContent className="p-3">
-                {eventosProximos.length === 0 ? (
+                {proximosQuery.loading ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <Skeleton key={i} className="h-16 w-full" />
+                    ))}
+                  </div>
+                ) : proximos.length === 0 ? (
                   <p className="text-muted-foreground py-4 text-center text-sm">
                     No hay eventos próximos
                   </p>
                 ) : (
                   <div className="space-y-2">
-                    {eventosProximos.map((e) => (
+                    {proximos.map((e) => (
                       <EventoCard key={e.id} evento={e} compact />
                     ))}
                   </div>
@@ -281,33 +375,40 @@ export default function CalendarioPage() {
         </div>
       </div>
 
-      <NuevoEventoDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        fechaInicial={diaSeleccionado}
-        onCrear={agregarEvento}
-      />
+      {diaSeleccionado && (
+        <NuevoEventoDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          fechaInicial={diaSeleccionado}
+          salas={salas}
+          onCrear={onCrearEvento}
+          creando={crearMut.loading}
+        />
+      )}
     </>
   );
 }
 
-/* ---------- Celda del día en la grilla ---------- */
-
 function DiaCell({
   dia,
   mesActual,
+  fechaHoyIso,
   seleccionado,
   eventos,
   onClick,
 }: {
   dia: Date;
   mesActual: Date;
+  fechaHoyIso: string | null;
   seleccionado: boolean;
   eventos: Evento[];
   onClick: () => void;
 }) {
   const esMesActual = isSameMonth(dia, mesActual);
-  const hoy = isToday(dia);
+  // "Hoy" en el demo no es new Date(), sino la fecha demo
+  const hoy = fechaHoyIso
+    ? isSameDay(dia, parseISO(fechaHoyIso))
+    : isToday(dia);
   const tieneEventos = eventos.length > 0;
   const esFeriado = eventos.some((e) => e.tipo === "feriado");
 
@@ -324,12 +425,10 @@ function DiaCell({
         esFeriado && !seleccionado && "bg-rose-50/50 dark:bg-rose-950/20",
       )}
     >
-      {/* Número del día */}
       <div
         className={cn(
           "mb-1 flex size-6 items-center justify-center rounded-full text-xs font-semibold",
-          hoy &&
-            "bg-primary text-primary-foreground",
+          hoy && "bg-primary text-primary-foreground",
           seleccionado && !hoy && "text-primary",
           !hoy && !seleccionado && "text-foreground",
         )}
@@ -337,7 +436,6 @@ function DiaCell({
         {format(dia, "d")}
       </div>
 
-      {/* Eventos — pills en desktop, dots en mobile */}
       <div className="flex-1 space-y-0.5 overflow-hidden">
         {eventos.slice(0, 2).map((e) => {
           const cfg = tipoEventoConfig[e.tipo];
@@ -362,7 +460,6 @@ function DiaCell({
         )}
       </div>
 
-      {/* Dots en mobile */}
       {tieneEventos && (
         <div className="mt-auto flex justify-center gap-0.5 md:hidden">
           {eventos.slice(0, 4).map((e) => {
@@ -379,8 +476,6 @@ function DiaCell({
     </button>
   );
 }
-
-/* ---------- Card de evento ---------- */
 
 function EventoCard({
   evento,
@@ -401,9 +496,7 @@ function EventoCard({
       )}
     >
       <div className="flex items-start gap-2">
-        <span
-          className={cn("mt-1.5 size-2 shrink-0 rounded-full", cfg.dot)}
-        />
+        <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", cfg.dot)} />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <h3 className={cn("truncate text-sm font-semibold", cfg.text)}>
@@ -451,9 +544,9 @@ function EventoCard({
             )}
           </div>
 
-          {!compact && evento.alcance && evento.alcance !== "general" && (
+          {!compact && evento.alcanceSalaNombre && (
             <Badge variant="outline" className="mt-2 text-[10px]">
-              {evento.alcance}
+              {evento.alcanceSalaNombre}
             </Badge>
           )}
         </div>
@@ -462,18 +555,22 @@ function EventoCard({
   );
 }
 
-/* ---------- Dialog Nuevo evento ---------- */
-
 function NuevoEventoDialog({
   open,
   onOpenChange,
   fechaInicial,
+  salas,
   onCrear,
+  creando,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   fechaInicial: Date;
-  onCrear: (evento: Omit<Evento, "id">) => void;
+  salas: { id: number; nombre: string }[];
+  onCrear: (
+    args: Omit<Parameters<typeof crearEvento>[1], "centroId" | "createdBy">,
+  ) => Promise<void> | void;
+  creando: boolean;
 }) {
   const uid = useId();
   const [titulo, setTitulo] = useState("");
@@ -486,37 +583,45 @@ function NuevoEventoDialog({
     "presencial",
   );
   const [ubicacion, setUbicacion] = useState("");
-  const [alcance, setAlcance] = useState("general");
+  const [alcanceSala, setAlcanceSala] = useState<string>("general");
   const [recordatorio, setRecordatorio] = useState(true);
+
+  // Cuando se reabre el dialog con una nueva fecha inicial, actualizarla
+  useEffect(() => {
+    if (open) {
+      setFecha(format(fechaInicial, "yyyy-MM-dd"));
+    }
+  }, [open, fechaInicial]);
 
   const reset = () => {
     setTitulo("");
     setDescripcion("");
-    setFecha(format(fechaInicial, "yyyy-MM-dd"));
     setHoraInicio("09:00");
     setHoraFin("10:00");
     setTipo("reunion");
     setModalidad("presencial");
     setUbicacion("");
-    setAlcance("general");
+    setAlcanceSala("general");
     setRecordatorio(true);
   };
 
-  const crear = () => {
+  const crear = async () => {
     if (!titulo.trim() || !fecha) {
       toast.error("Completa el título y la fecha");
       return;
     }
-    onCrear({
+    const salaId =
+      alcanceSala === "general" ? null : Number(alcanceSala);
+    await onCrear({
       titulo,
-      descripcion,
+      descripcion: descripcion || null,
       fecha,
-      horaInicio: horaInicio || undefined,
-      horaFin: horaFin || undefined,
+      horaInicio: horaInicio || null,
+      horaFin: horaFin || null,
       tipo,
       modalidad,
-      ubicacion: ubicacion || undefined,
-      alcance,
+      ubicacion: modalidad === "presencial" ? ubicacion || null : null,
+      alcanceSalaId: salaId,
       recordatorio,
     });
     reset();
@@ -585,24 +690,29 @@ function NuevoEventoDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor={`${uid}-tipo`}>Tipo</Label>
-              <Select value={tipo} onValueChange={(v) => setTipo(v as TipoEvento)}>
+              <Select
+                value={tipo}
+                onValueChange={(v) => setTipo(v as TipoEvento)}
+              >
                 <SelectTrigger id={`${uid}-tipo`}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {(Object.keys(tipoEventoConfig) as TipoEvento[]).map((t) => (
-                    <SelectItem key={t} value={t}>
-                      <span className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            "size-2 rounded-full",
-                            tipoEventoConfig[t].dot,
-                          )}
-                        />
-                        {tipoEventoConfig[t].label}
-                      </span>
-                    </SelectItem>
-                  ))}
+                  {(Object.keys(tipoEventoConfig) as TipoEvento[])
+                    .filter((t) => t !== "feriado")
+                    .map((t) => (
+                      <SelectItem key={t} value={t}>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              "size-2 rounded-full",
+                              tipoEventoConfig[t].dot,
+                            )}
+                          />
+                          {tipoEventoConfig[t].label}
+                        </span>
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             </div>
@@ -626,14 +736,14 @@ function NuevoEventoDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor={`${uid}-alcance`}>Dirigido a</Label>
-              <Select value={alcance} onValueChange={setAlcance}>
+              <Select value={alcanceSala} onValueChange={setAlcanceSala}>
                 <SelectTrigger id={`${uid}-alcance`}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="general">General</SelectItem>
                   {salas.map((s) => (
-                    <SelectItem key={s.id} value={s.nombre}>
+                    <SelectItem key={s.id} value={String(s.id)}>
                       {s.nombre}
                     </SelectItem>
                   ))}
@@ -675,12 +785,17 @@ function NuevoEventoDialog({
               reset();
               onOpenChange(false);
             }}
+            disabled={creando}
           >
             Cancelar
           </Button>
-          <Button onClick={crear} className="gap-1.5">
+          <Button
+            onClick={() => void crear()}
+            className="gap-1.5"
+            disabled={creando}
+          >
             <RiCalendarEventLine className="size-4" />
-            Crear evento
+            {creando ? "Creando…" : "Crear evento"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -8,7 +8,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import { asistenciaSemanal } from "@/lib/data/mock";
+import type { AsistenciaDia } from "@/lib/db/types";
 
 const chartConfig = {
   presentes: {
@@ -21,29 +21,16 @@ const chartConfig = {
   },
 } satisfies ChartConfig;
 
-export function WeeklyAttendanceChart() {
+export function WeeklyAttendanceChart({ data }: { data: AsistenciaDia[] }) {
   return (
     <ChartContainer config={chartConfig} className="h-[240px] w-full">
-      <BarChart data={asistenciaSemanal} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+      <BarChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
-        <XAxis
-          dataKey="dia"
-          tickLine={false}
-          axisLine={false}
-          tickMargin={8}
-        />
+        <XAxis dataKey="dia" tickLine={false} axisLine={false} tickMargin={8} />
         <YAxis tickLine={false} axisLine={false} tickMargin={8} width={32} />
         <ChartTooltip content={<ChartTooltipContent />} />
-        <Bar
-          dataKey="presentes"
-          fill="var(--color-presentes)"
-          radius={[6, 6, 0, 0]}
-        />
-        <Bar
-          dataKey="ausentes"
-          fill="var(--color-ausentes)"
-          radius={[6, 6, 0, 0]}
-        />
+        <Bar dataKey="presentes" fill="var(--color-presentes)" radius={[6, 6, 0, 0]} />
+        <Bar dataKey="ausentes" fill="var(--color-ausentes)" radius={[6, 6, 0, 0]} />
       </BarChart>
     </ChartContainer>
   );

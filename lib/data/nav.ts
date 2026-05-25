@@ -7,6 +7,7 @@ import {
   RiBookOpenLine,
   RiUserSmileLine,
   RiPushpinLine,
+  RiFileChartLine,
   type RemixiconComponentType,
 } from "@remixicon/react";
 
@@ -25,4 +26,5 @@ export const navItems: NavItem[] = [
   { title: "Planificación", href: "/dashboard/planificacion", icon: RiBookOpenLine },
   { title: "Párvulos", href: "/dashboard/parvulos", icon: RiUserSmileLine },
   { title: "Mural", href: "/dashboard/mural", icon: RiPushpinLine },
+  { title: "Reportes", href: "/dashboard/reportes", icon: RiFileChartLine },
 ];

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -41,6 +41,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -52,81 +53,138 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
+import { inicialesDe } from "@/lib/utils/nino";
+import { useDbQuery } from "@/lib/db/use-db-query";
+import { useDbMutation } from "@/lib/db/use-db-mutation";
+import { useDbContext } from "@/lib/db/provider";
+import { useSesion } from "@/lib/db/sesion-context";
+import { generarAsistenciaMensual } from "@/lib/reports";
+import { listByCentro as listSalas } from "@/lib/db/repositories/salas";
 import {
-  inicialesDe,
-  ninos as ninosBase,
-  salas,
-  type EstadoAsistencia,
-  type Nino,
-} from "@/lib/data/mock";
+  getResumenDia,
+  listAsistenciaDelDia,
+  registrarRetiro,
+  upsertEstado,
+} from "@/lib/db/repositories/asistencia";
+import type { EstadoAsistencia, NinoConAsistencia } from "@/lib/db/types";
 
-type NinoConRetiro = Nino & { retiroHora?: string };
-
-const TODAS = "todas";
+const TODAS = -1;
 
 const estadoConfig: Record<
   EstadoAsistencia,
-  { label: string; dot: string; badge: string }
+  { label: string; badge: string }
 > = {
   presente: {
     label: "Presente",
-    dot: "bg-emerald-500",
     badge:
       "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-400",
   },
   ausente: {
     label: "Ausente",
-    dot: "bg-rose-500",
     badge:
       "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-400",
   },
   atrasado: {
     label: "Atrasado",
-    dot: "bg-amber-500",
     badge:
       "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-400",
   },
+  retirado: {
+    label: "Retirado",
+    badge:
+      "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-900 dark:bg-slate-950/40 dark:text-slate-400",
+  },
 };
 
+const toISODate = (d: Date) => format(d, "yyyy-MM-dd");
+
 export default function AsistenciaPage() {
-  const [fecha, setFecha] = useState<Date>(new Date());
-  const [salaActiva, setSalaActiva] = useState<string>(TODAS);
-  const [lista, setLista] = useState<NinoConRetiro[]>(ninosBase);
+  const dbCtx = useDbContext();
+  const { usuario, centroActivo, fechaHoyDemo } = useSesion();
+  const usuarioId = usuario.id;
+  const [exportandoPdf, setExportandoPdf] = useState(false);
+  const centroId = centroActivo.id;
 
-  // Dialog de retiro anticipado
-  const [retiroOpen, setRetiroOpen] = useState(false);
-  const [retiroNinoId, setRetiroNinoId] = useState<number | null>(null);
-  const [retiroHora, setRetiroHora] = useState<string>("");
+  const [fecha, setFecha] = useState<Date | null>(null);
+  const [salaActivaId, setSalaActivaId] = useState<number>(TODAS);
 
-  const ninosFiltrados = useMemo(
-    () =>
-      salaActiva === TODAS ? lista : lista.filter((n) => n.sala === salaActiva),
-    [lista, salaActiva],
+  // Inicializa la fecha cuando llega la del demo
+  useEffect(() => {
+    if (!fecha && fechaHoyDemo) {
+      setFecha(new Date(`${fechaHoyDemo}T00:00:00`));
+    }
+  }, [fecha, fechaHoyDemo]);
+
+  const fechaIso = fecha ? toISODate(fecha) : null;
+  const salaIdParam = salaActivaId === TODAS ? null : salaActivaId;
+
+  const salasQuery = useDbQuery((db) => listSalas(db, centroId), [centroId]);
+
+  const listaQuery = useDbQuery(
+    async (db) =>
+      fechaIso == null
+        ? []
+        : await listAsistenciaDelDia(db, centroId, fechaIso, salaIdParam),
+    [centroId, fechaIso, salaIdParam],
   );
 
-  const resumen = useMemo(() => {
-    const base = { presente: 0, ausente: 0, atrasado: 0 };
-    ninosFiltrados.forEach((n) => {
-      base[n.estadoHoy] += 1;
-    });
-    return base;
-  }, [ninosFiltrados]);
+  const resumenQuery = useDbQuery(
+    async (db) =>
+      fechaIso == null
+        ? { total: 0, presentes: 0, ausentes: 0, atrasados: 0, sinRegistro: 0 }
+        : await getResumenDia(db, centroId, fechaIso, salaIdParam),
+    [centroId, fechaIso, salaIdParam],
+  );
 
-  const total = ninosFiltrados.length;
+  const upsertMut = useDbMutation(
+    (
+      db,
+      args: { ninoId: number; fecha: string; estado: EstadoAsistencia; usuarioId: number },
+    ) => upsertEstado(db, args),
+  );
+  const retiroMut = useDbMutation(
+    (
+      db,
+      args: {
+        ninoId: number;
+        fecha: string;
+        horaRetiro: string;
+        retiradoPor: string | null;
+        usuarioId: number;
+      },
+    ) => registrarRetiro(db, args),
+  );
+
+  // Dialog de retiro
+  const [retiroOpen, setRetiroOpen] = useState(false);
+  const [retiroNino, setRetiroNino] = useState<NinoConAsistencia | null>(null);
+  const [retiroHora, setRetiroHora] = useState<string>("");
+
+  const salas = salasQuery.data ?? [];
+  const lista = listaQuery.data ?? [];
+  const resumen = resumenQuery.data ?? {
+    total: 0, presentes: 0, ausentes: 0, atrasados: 0, sinRegistro: 0,
+  };
   const porcentajePresentes =
-    total > 0 ? Math.round((resumen.presente / total) * 100) : 0;
+    resumen.total > 0 ? Math.round((resumen.presentes / resumen.total) * 100) : 0;
 
-  const cambiarEstado = (id: number, estado: EstadoAsistencia) => {
-    setLista((prev) =>
-      prev.map((n) =>
-        n.id === id ? { ...n, estadoHoy: estado, retiroHora: undefined } : n,
-      ),
-    );
+  const cargandoFecha = !fecha;
+  const cargandoLista = listaQuery.loading || cargandoFecha;
+
+  const cambiarEstado = async (ninoId: number, estado: EstadoAsistencia) => {
+    if (!fechaIso) return;
+    try {
+      await upsertMut.mutate({ ninoId, fecha: fechaIso, estado, usuarioId });
+      listaQuery.refetch();
+      resumenQuery.refetch();
+    } catch {
+      toast.error("No se pudo registrar el estado");
+    }
   };
 
-  const abrirRetiro = (id: number) => {
+  const abrirRetiro = (nino: NinoConAsistencia) => {
     const ahora = new Date();
-    setRetiroNinoId(id);
+    setRetiroNino(nino);
     setRetiroHora(
       `${ahora.getHours().toString().padStart(2, "0")}:${ahora
         .getMinutes()
@@ -136,49 +194,56 @@ export default function AsistenciaPage() {
     setRetiroOpen(true);
   };
 
-  const confirmarRetiro = () => {
-    if (retiroNinoId === null || !retiroHora) return;
-    setLista((prev) =>
-      prev.map((n) =>
-        n.id === retiroNinoId ? { ...n, retiroHora, estadoHoy: "presente" } : n,
-      ),
-    );
-    const nino = lista.find((n) => n.id === retiroNinoId);
-    toast.success("Retiro anticipado registrado", {
-      description: `${nino?.nombre ?? "Párvulo"} fue retirado a las ${retiroHora}.`,
-    });
-    setRetiroOpen(false);
-    setRetiroNinoId(null);
+  const confirmarRetiro = async () => {
+    if (!retiroNino || !retiroHora || !fechaIso) return;
+    try {
+      await retiroMut.mutate({
+        ninoId: retiroNino.id,
+        fecha: fechaIso,
+        horaRetiro: retiroHora,
+        retiradoPor: retiroNino.apoderado,
+        usuarioId,
+      });
+      listaQuery.refetch();
+      resumenQuery.refetch();
+      toast.success("Retiro anticipado registrado", {
+        description: `${retiroNino.nombre} fue retirado a las ${retiroHora}.`,
+      });
+      setRetiroOpen(false);
+      setRetiroNino(null);
+    } catch {
+      toast.error("No se pudo registrar el retiro");
+    }
   };
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Encabezado */}
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="font-heading text-2xl font-semibold tracking-tight md:text-3xl">
             Asistencia diaria
           </h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            Registra la asistencia de los párvulos y gestiona retiros
-            anticipados.
+            Registra la asistencia de los párvulos y gestiona retiros anticipados.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="outline" className="justify-start gap-2">
+              <Button variant="outline" className="justify-start gap-2" disabled={cargandoFecha}>
                 <RiCalendarLine className="size-4" />
                 <span className="capitalize">
-                  {format(fecha, "EEEE d 'de' MMMM, yyyy", { locale: es })}
+                  {fecha
+                    ? format(fecha, "EEEE d 'de' MMMM, yyyy", { locale: es })
+                    : "Cargando fecha…"}
                 </span>
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="end">
               <Calendar
                 mode="single"
-                selected={fecha}
+                selected={fecha ?? undefined}
                 onSelect={(d) => d && setFecha(d)}
                 locale={es}
                 autoFocus
@@ -189,12 +254,26 @@ export default function AsistenciaPage() {
           <Button
             variant="outline"
             size="icon"
-            aria-label="Exportar reporte"
-            onClick={() =>
-              toast.info("Exportando reporte…", {
-                description: "El archivo CSV se generará en breve.",
-              })
-            }
+            aria-label="Exportar reporte del mes"
+            disabled={exportandoPdf || !fecha || dbCtx.status !== "ready"}
+            onClick={async () => {
+              if (!fecha || dbCtx.status !== "ready") return;
+              setExportandoPdf(true);
+              try {
+                const nombre = await generarAsistenciaMensual(
+                  { db: dbCtx.db, centro: centroActivo, usuario },
+                  fecha.getFullYear(),
+                  fecha.getMonth() + 1,
+                );
+                toast.success("Reporte generado", { description: nombre });
+              } catch (e) {
+                toast.error("No se pudo generar el reporte", {
+                  description: e instanceof Error ? e.message : undefined,
+                });
+              } finally {
+                setExportandoPdf(false);
+              }
+            }}
           >
             <RiDownload2Line className="size-4" />
           </Button>
@@ -213,21 +292,24 @@ export default function AsistenciaPage() {
         </div>
       </div>
 
-      {/* Stat cards del día */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
-          <CardContent className="flex items-start justify-between gap-3 ">
+          <CardContent className="flex items-start justify-between gap-3">
             <div className="space-y-1">
               <p className="text-muted-foreground text-sm font-medium">
                 Total del filtro
               </p>
-              <p className="font-heading text-3xl font-semibold tracking-tight">
-                {total}
-              </p>
+              {resumenQuery.loading ? (
+                <Skeleton className="h-9 w-12" />
+              ) : (
+                <p className="font-heading text-3xl font-semibold tracking-tight">
+                  {resumen.total}
+                </p>
+              )}
               <p className="text-muted-foreground text-xs">
-                {salaActiva === TODAS
+                {salaActivaId === TODAS
                   ? "Todas las salas"
-                  : `Sala: ${salaActiva}`}
+                  : `Sala: ${salas.find((s) => s.id === salaActivaId)?.nombre ?? ""}`}
               </p>
             </div>
             <div className="bg-primary/10 text-primary flex size-11 shrink-0 items-center justify-center rounded-xl">
@@ -238,45 +320,52 @@ export default function AsistenciaPage() {
 
         <EstadoCard
           label="Presentes"
-          value={resumen.presente}
+          value={resumen.presentes}
           hint={`${porcentajePresentes}% de asistencia`}
           icon={RiCheckboxCircleFill}
           tono="emerald"
+          loading={resumenQuery.loading}
         />
         <EstadoCard
           label="Ausentes"
-          value={resumen.ausente}
-          hint="Sin notificación registrada"
+          value={resumen.ausentes}
+          hint={
+            resumen.sinRegistro > 0
+              ? `+ ${resumen.sinRegistro} sin registro`
+              : "Sin notificación registrada"
+          }
           icon={RiCloseCircleFill}
           tono="rose"
+          loading={resumenQuery.loading}
         />
         <EstadoCard
           label="Atrasados"
-          value={resumen.atrasado}
+          value={resumen.atrasados}
           hint="Ingreso posterior al horario"
           icon={RiTimeFill}
           tono="amber"
+          loading={resumenQuery.loading}
         />
       </div>
 
-      {/* Tabla por sala */}
       <Card>
         <CardHeader className="gap-4 border-b">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <CardTitle className="font-heading">
-                Listado de párvulos
-              </CardTitle>
+              <CardTitle className="font-heading">Listado de párvulos</CardTitle>
               <CardDescription>
                 Haz click en el estado para actualizarlo
               </CardDescription>
             </div>
 
-            <Tabs value={salaActiva} onValueChange={setSalaActiva}>
+            <Tabs
+              value={String(salaActivaId)}
+              onValueChange={(v) => setSalaActivaId(Number(v))}
+            >
               <TabsList>
-                <TabsTrigger value={TODAS}>Todas</TabsTrigger>
+                <TabsTrigger value={String(TODAS)}>Todas</TabsTrigger>
                 {salas.map((s) => (
-                  <TabsTrigger key={s.id} value={s.nombre}>
+                  <TabsTrigger key={s.id} value={String(s.id)}>
                     {s.nombre}
                   </TabsTrigger>
                 ))}
@@ -291,15 +380,21 @@ export default function AsistenciaPage() {
               <TableRow>
                 <TableHead className="min-w-[220px]">Párvulo</TableHead>
                 <TableHead className="hidden md:table-cell">Sala</TableHead>
-                <TableHead className="hidden md:table-cell">
-                  Apoderado
-                </TableHead>
+                <TableHead className="hidden md:table-cell">Apoderado</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {ninosFiltrados.length === 0 ? (
+              {cargandoLista ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell colSpan={5}>
+                      <Skeleton className="h-10 w-full" />
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : lista.length === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={5}
@@ -309,8 +404,8 @@ export default function AsistenciaPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                ninosFiltrados.map((nino) => {
-                  const cfg = estadoConfig[nino.estadoHoy];
+                lista.map((nino) => {
+                  const cfg = nino.estado ? estadoConfig[nino.estado] : null;
                   return (
                     <TableRow key={nino.id}>
                       <TableCell>
@@ -325,17 +420,17 @@ export default function AsistenciaPage() {
                               {nino.nombre} {nino.apellido}
                             </div>
                             <div className="text-muted-foreground truncate text-xs md:hidden">
-                              {nino.sala}
+                              {nino.salaNombre}
                             </div>
                           </div>
                         </div>
                       </TableCell>
                       <TableCell className="hidden md:table-cell">
-                        <span className="text-sm">{nino.sala}</span>
+                        <span className="text-sm">{nino.salaNombre}</span>
                       </TableCell>
                       <TableCell className="hidden md:table-cell">
                         <span className="text-muted-foreground text-sm">
-                          {nino.apoderado}
+                          {nino.apoderado ?? "Sin apoderado"}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -343,9 +438,9 @@ export default function AsistenciaPage() {
                           <ToggleGroup
                             type="single"
                             size="sm"
-                            value={nino.estadoHoy}
+                            value={nino.estado ?? ""}
                             onValueChange={(v) =>
-                              v && cambiarEstado(nino.id, v as EstadoAsistencia)
+                              v && void cambiarEstado(nino.id, v as EstadoAsistencia)
                             }
                             className="bg-muted/40 rounded-md p-0.5"
                           >
@@ -381,14 +476,20 @@ export default function AsistenciaPage() {
                             </ToggleGroupItem>
                           </ToggleGroup>
 
-                          {nino.retiroHora && (
+                          {nino.horaRetiro && cfg && (
                             <Badge
                               variant="outline"
                               className={cn("gap-1 text-xs", cfg.badge)}
                             >
                               <RiLogoutBoxRLine className="size-3" />
-                              Retirado {nino.retiroHora}
+                              Retirado {nino.horaRetiro.slice(0, 5)}
                             </Badge>
+                          )}
+
+                          {!nino.estado && (
+                            <span className="text-muted-foreground text-xs">
+                              Sin registro todavía
+                            </span>
                           )}
                         </div>
                       </TableCell>
@@ -396,7 +497,7 @@ export default function AsistenciaPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => abrirRetiro(nino.id)}
+                          onClick={() => abrirRetiro(nino)}
                           className="gap-1.5"
                         >
                           <RiLogoutBoxRLine className="size-4" />
@@ -414,13 +515,14 @@ export default function AsistenciaPage() {
         </CardContent>
       </Card>
 
-      {/* Dialog retiro anticipado */}
       <Dialog open={retiroOpen} onOpenChange={setRetiroOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Registrar retiro anticipado</DialogTitle>
             <DialogDescription>
-              Indica la hora en que el párvulo fue retirado por su apoderado.
+              {retiroNino
+                ? `Indica la hora en que ${retiroNino.nombre} ${retiroNino.apellido} fue retirado/a por ${retiroNino.apoderado ?? "su apoderado"}.`
+                : "Indica la hora en que el párvulo fue retirado por su apoderado."}
             </DialogDescription>
           </DialogHeader>
 
@@ -438,8 +540,11 @@ export default function AsistenciaPage() {
             <Button variant="outline" onClick={() => setRetiroOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={confirmarRetiro} disabled={!retiroHora}>
-              Confirmar retiro
+            <Button
+              onClick={() => void confirmarRetiro()}
+              disabled={!retiroHora || retiroMut.loading}
+            >
+              {retiroMut.loading ? "Guardando…" : "Confirmar retiro"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -448,14 +553,13 @@ export default function AsistenciaPage() {
   );
 }
 
-/* ---------- Subcomponente local: stat card con tono ---------- */
-
 type EstadoCardProps = {
   label: string;
   value: number;
   hint: string;
   icon: React.ComponentType<{ className?: string }>;
   tono: "emerald" | "rose" | "amber";
+  loading: boolean;
 };
 
 const tonoStyles: Record<EstadoCardProps["tono"], string> = {
@@ -465,15 +569,19 @@ const tonoStyles: Record<EstadoCardProps["tono"], string> = {
   amber: "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400",
 };
 
-function EstadoCard({ label, value, hint, icon: Icon, tono }: EstadoCardProps) {
+function EstadoCard({ label, value, hint, icon: Icon, tono, loading }: EstadoCardProps) {
   return (
     <Card>
-      <CardContent className="flex items-start justify-between gap-3 ">
+      <CardContent className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <p className="text-muted-foreground text-sm font-medium">{label}</p>
-          <p className="font-heading text-3xl font-semibold tracking-tight">
-            {value}
-          </p>
+          {loading ? (
+            <Skeleton className="h-9 w-12" />
+          ) : (
+            <p className="font-heading text-3xl font-semibold tracking-tight">
+              {value}
+            </p>
+          )}
           <p className="text-muted-foreground text-xs">{hint}</p>
         </div>
         <div

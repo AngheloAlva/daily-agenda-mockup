@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -40,71 +40,28 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { inicialesDe, ninos, salas, type Nino } from "@/lib/data/mock";
+import { inicialesDe } from "@/lib/utils/nino";
+import { useDbQuery } from "@/lib/db/use-db-query";
+import { useDbMutation } from "@/lib/db/use-db-mutation";
+import { useSesion } from "@/lib/db/sesion-context";
+import { listByCentro as listSalas } from "@/lib/db/repositories/salas";
+import {
+  getResumenInformes,
+  listInformesDelDia,
+  upsertInforme,
+} from "@/lib/db/repositories/informes";
+import type {
+  AnimoNino,
+  EstadoAlimento,
+  EstadoInforme,
+  Informe,
+} from "@/lib/db/types";
 
-/* ---------- Tipos ---------- */
-
-type EstadoInforme = "pendiente" | "borrador" | "publicado";
-type Animo = "feliz" | "normal" | "triste" | "";
-
-type Informe = {
-  estado: EstadoInforme;
-  alimentacion: { desayuno: boolean; almuerzo: boolean; once: boolean };
-  siestaInicio: string;
-  siestaFin: string;
-  mudas: number;
-  animo: Animo;
-  actividades: string;
-  observaciones: string;
-  fotoCargada: boolean;
-};
-
-const informeVacio = (): Informe => ({
-  estado: "pendiente",
-  alimentacion: { desayuno: false, almuerzo: false, once: false },
-  siestaInicio: "",
-  siestaFin: "",
-  mudas: 0,
-  animo: "",
-  actividades: "",
-  observaciones: "",
-  fotoCargada: false,
-});
-
-// Seed inicial con variedad de estados para el demo
-const informesIniciales: Record<number, Informe> = {
-  1: {
-    // Sofía — publicado completo
-    estado: "publicado",
-    alimentacion: { desayuno: true, almuerzo: true, once: true },
-    siestaInicio: "13:00",
-    siestaFin: "14:30",
-    mudas: 2,
-    animo: "feliz",
-    actividades:
-      "Participó en actividad de motricidad fina con plasticinas. Exploración sensorial con texturas blandas.",
-    observaciones:
-      "Tuvo un excelente día. Respondió a su nombre en varias oportunidades.",
-    fotoCargada: true,
-  },
-  2: {
-    // Matías — borrador incompleto
-    estado: "borrador",
-    alimentacion: { desayuno: true, almuerzo: true, once: false },
-    siestaInicio: "13:15",
-    siestaFin: "14:00",
-    mudas: 1,
-    animo: "normal",
-    actividades: "Exploración libre en el rincón de construcción.",
-    observaciones: "",
-    fotoCargada: false,
-  },
-};
-
-const TODAS = "todas";
+const TODAS = -1;
 
 const estadoConfig: Record<
   EstadoInforme,
@@ -127,71 +84,129 @@ const estadoConfig: Record<
   },
 };
 
-const animoEmoji: Record<Exclude<Animo, "">, string> = {
+const animoEmoji: Record<AnimoNino, string> = {
   feliz: "😊",
   normal: "😐",
   triste: "😢",
 };
 
-/* ---------- Página ---------- */
+const toISO = (d: Date) => format(d, "yyyy-MM-dd");
 
 export default function InformesPage() {
-  const [fecha, setFecha] = useState<Date>(new Date());
-  const [salaActiva, setSalaActiva] = useState<string>(TODAS);
-  const [informes, setInformes] =
-    useState<Record<number, Informe>>(informesIniciales);
+  const { usuario, centroActivo, fechaHoyDemo } = useSesion();
+  const usuarioId = usuario.id;
+  const centroId = centroActivo.id;
 
-  // Niños presentes del día (ni ausentes) filtrados por sala
-  const ninosPresentes = useMemo(
-    () =>
-      ninos
-        .filter((n) => n.estadoHoy !== "ausente")
-        .filter((n) => salaActiva === TODAS || n.sala === salaActiva),
-    [salaActiva],
+  const [fecha, setFecha] = useState<Date | null>(null);
+  const [salaActivaId, setSalaActivaId] = useState<number>(TODAS);
+
+  useEffect(() => {
+    if (!fecha && fechaHoyDemo) {
+      setFecha(new Date(`${fechaHoyDemo}T00:00:00`));
+    }
+  }, [fecha, fechaHoyDemo]);
+
+  const fechaIso = fecha ? toISO(fecha) : null;
+  const salaIdParam = salaActivaId === TODAS ? null : salaActivaId;
+
+  const salasQuery = useDbQuery(
+    (db) => listSalas(db, centroId),
+    [centroId],
   );
 
-  const getInforme = (id: number): Informe => informes[id] ?? informeVacio();
+  const listaQuery = useDbQuery(
+    async (db) =>
+      fechaIso == null
+        ? []
+        : await listInformesDelDia(db, centroId, fechaIso, salaIdParam),
+    [centroId, fechaIso, salaIdParam],
+  );
 
-  const resumen = useMemo(() => {
-    const base = { pendiente: 0, borrador: 0, publicado: 0 };
-    ninosPresentes.forEach((n) => {
-      const estado = informes[n.id]?.estado ?? "pendiente";
-      base[estado] += 1;
-    });
-    return base;
-  }, [ninosPresentes, informes]);
+  const resumenQuery = useDbQuery(
+    async (db) =>
+      fechaIso == null
+        ? { pendiente: 0, borrador: 0, publicado: 0 }
+        : await getResumenInformes(db, centroId, fechaIso, salaIdParam),
+    [centroId, fechaIso, salaIdParam],
+  );
 
-  const actualizar = (id: number, patch: Partial<Informe>) => {
-    setInformes((prev) => ({
+  const upsertMut = useDbMutation(
+    (
+      db,
+      args: Parameters<typeof upsertInforme>[1],
+    ) => upsertInforme(db, args),
+  );
+
+  // Estado local del form por niño. Se inicializa desde el server y permite editar.
+  // Reset al cambiar fecha o sala.
+  const [forms, setForms] = useState<Record<number, Informe>>({});
+  const lastContextRef = useRef<string>("");
+
+  useEffect(() => {
+    const ctx = `${fechaIso}|${salaIdParam}`;
+    if (lastContextRef.current !== ctx) {
+      setForms({});
+      lastContextRef.current = ctx;
+    }
+    if (listaQuery.data) {
+      setForms((prev) => {
+        const next = { ...prev };
+        for (const item of listaQuery.data!) {
+          if (!(item.ninoId in next)) {
+            next[item.ninoId] = item.informe;
+          }
+        }
+        return next;
+      });
+    }
+  }, [listaQuery.data, fechaIso, salaIdParam]);
+
+  const salas = salasQuery.data ?? [];
+  const lista = listaQuery.data ?? [];
+  const resumen = resumenQuery.data ?? { pendiente: 0, borrador: 0, publicado: 0 };
+  const cargando = !fecha || listaQuery.loading;
+
+  const actualizar = (ninoId: number, patch: Partial<Informe>) => {
+    setForms((prev) => ({
       ...prev,
-      [id]: { ...getInforme(id), ...patch },
+      [ninoId]: { ...(prev[ninoId] ?? informeVacioCliente()), ...patch },
     }));
   };
 
-  const guardarBorrador = (nino: Nino) => {
-    actualizar(nino.id, { estado: "borrador" });
-    toast.success("Borrador guardado", {
-      description: `Informe de ${nino.nombre} guardado como borrador.`,
-    });
-  };
-
-  const publicar = (nino: Nino) => {
-    actualizar(nino.id, { estado: "publicado" });
-    toast.success("Informe publicado", {
-      description: `${nino.nombre}: el apoderado recibirá una notificación.`,
-    });
-  };
-
-  const despublicar = (nino: Nino) => {
-    actualizar(nino.id, { estado: "borrador" });
-    toast.info("Informe despublicado", {
-      description: `Vuelve a borrador para corrección.`,
-    });
+  const guardar = async (ninoId: number, estado: EstadoInforme, nombre: string) => {
+    if (!fechaIso) return;
+    const informe = forms[ninoId];
+    if (!informe) return;
+    try {
+      await upsertMut.mutate({
+        ninoId,
+        fecha: fechaIso,
+        autorId: usuarioId,
+        estado,
+        informe: { ...informe, estado },
+      });
+      listaQuery.refetch();
+      resumenQuery.refetch();
+      if (estado === "publicado") {
+        toast.success("Informe publicado", {
+          description: `${nombre}: el apoderado recibirá una notificación.`,
+        });
+      } else if (estado === "borrador") {
+        toast.success("Borrador guardado", {
+          description: `Informe de ${nombre} guardado como borrador.`,
+        });
+      } else {
+        toast.info("Informe despublicado", {
+          description: `Vuelve a borrador para corrección.`,
+        });
+      }
+    } catch {
+      toast.error("No se pudo guardar el informe");
+    }
   };
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Encabezado */}
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="font-heading text-2xl font-semibold tracking-tight md:text-3xl">
@@ -205,17 +220,23 @@ export default function InformesPage() {
 
         <Popover>
           <PopoverTrigger asChild>
-            <Button variant="outline" className="justify-start gap-2">
+            <Button
+              variant="outline"
+              className="justify-start gap-2"
+              disabled={!fecha}
+            >
               <RiCalendarLine className="size-4" />
               <span className="capitalize">
-                {format(fecha, "EEEE d 'de' MMMM, yyyy", { locale: es })}
+                {fecha
+                  ? format(fecha, "EEEE d 'de' MMMM, yyyy", { locale: es })
+                  : "Cargando fecha…"}
               </span>
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0" align="end">
             <Calendar
               mode="single"
-              selected={fecha}
+              selected={fecha ?? undefined}
               onSelect={(d) => d && setFecha(d)}
               locale={es}
               autoFocus
@@ -224,7 +245,6 @@ export default function InformesPage() {
         </Popover>
       </div>
 
-      {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-3">
         <EstadoCard
           label="Pendientes"
@@ -232,6 +252,7 @@ export default function InformesPage() {
           hint="Sin completar"
           color="amber"
           icon={RiTimeLine}
+          loading={resumenQuery.loading}
         />
         <EstadoCard
           label="Borradores"
@@ -239,6 +260,7 @@ export default function InformesPage() {
           hint="En proceso de redacción"
           color="sky"
           icon={RiDraftLine}
+          loading={resumenQuery.loading}
         />
         <EstadoCard
           label="Publicados"
@@ -246,23 +268,31 @@ export default function InformesPage() {
           hint="Visibles para apoderados"
           color="emerald"
           icon={RiCheckDoubleFill}
+          loading={resumenQuery.loading}
         />
       </div>
 
-      {/* Tabs sala */}
-      <Tabs value={salaActiva} onValueChange={setSalaActiva}>
+      <Tabs
+        value={String(salaActivaId)}
+        onValueChange={(v) => setSalaActivaId(Number(v))}
+      >
         <TabsList>
-          <TabsTrigger value={TODAS}>Todas</TabsTrigger>
+          <TabsTrigger value={String(TODAS)}>Todas</TabsTrigger>
           {salas.map((s) => (
-            <TabsTrigger key={s.id} value={s.nombre}>
+            <TabsTrigger key={s.id} value={String(s.id)}>
               {s.nombre}
             </TabsTrigger>
           ))}
         </TabsList>
       </Tabs>
 
-      {/* Accordion de informes */}
-      {ninosPresentes.length === 0 ? (
+      {cargando ? (
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-16 w-full" />
+          ))}
+        </div>
+      ) : lista.length === 0 ? (
         <Card>
           <CardContent className="text-muted-foreground flex flex-col items-center gap-2 p-12 text-center">
             <RiRestaurantLine className="size-10 opacity-40" />
@@ -274,28 +304,28 @@ export default function InformesPage() {
           type="multiple"
           className="flex border-none overflow-visible flex-col gap-3"
         >
-          {ninosPresentes.map((nino) => {
-            const informe = getInforme(nino.id);
+          {lista.map((item) => {
+            const informe = forms[item.ninoId] ?? item.informe;
             const cfg = estadoConfig[informe.estado];
 
             return (
               <AccordionItem
-                key={nino.id}
-                value={String(nino.id)}
+                key={item.ninoId}
+                value={String(item.ninoId)}
                 className="bg-card rounded-xl border px-4"
               >
                 <AccordionTrigger className="hover:no-underline">
                   <div className="flex flex-1 items-center gap-3 pr-3">
                     <Avatar className="size-10 shrink-0">
                       <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                        {inicialesDe(nino.nombre, nino.apellido)}
+                        {inicialesDe(item.nombre, item.apellido)}
                       </AvatarFallback>
                     </Avatar>
 
                     <div className="min-w-0 flex-1 text-left">
                       <div className="flex items-center gap-2">
                         <p className="truncate text-sm font-semibold">
-                          {nino.nombre} {nino.apellido}
+                          {item.nombre} {item.apellido}
                         </p>
                         {informe.animo && (
                           <span
@@ -307,7 +337,7 @@ export default function InformesPage() {
                         )}
                       </div>
                       <p className="text-muted-foreground truncate text-xs">
-                        {nino.sala}
+                        {item.salaNombre}
                         {informe.siestaInicio && informe.siestaFin && (
                           <>
                             {" · "}
@@ -330,10 +360,17 @@ export default function InformesPage() {
                 <AccordionContent className="pt-2 pb-4">
                   <InformeForm
                     informe={informe}
-                    onChange={(patch) => actualizar(nino.id, patch)}
-                    onGuardarBorrador={() => guardarBorrador(nino)}
-                    onPublicar={() => publicar(nino)}
-                    onDespublicar={() => despublicar(nino)}
+                    onChange={(patch) => actualizar(item.ninoId, patch)}
+                    onGuardarBorrador={() =>
+                      void guardar(item.ninoId, "borrador", item.nombre)
+                    }
+                    onPublicar={() =>
+                      void guardar(item.ninoId, "publicado", item.nombre)
+                    }
+                    onDespublicar={() =>
+                      void guardar(item.ninoId, "borrador", item.nombre)
+                    }
+                    guardando={upsertMut.loading}
                   />
                 </AccordionContent>
               </AccordionItem>
@@ -345,7 +382,21 @@ export default function InformesPage() {
   );
 }
 
-/* ---------- Form de informe ---------- */
+function informeVacioCliente(): Informe {
+  return {
+    estado: "pendiente",
+    desayuno: null,
+    almuerzo: null,
+    once: null,
+    siestaInicio: null,
+    siestaFin: null,
+    panalCambios: 0,
+    animo: null,
+    actividades: null,
+    observaciones: null,
+    fotoCargada: false,
+  };
+}
 
 function InformeForm({
   informe,
@@ -353,19 +404,28 @@ function InformeForm({
   onGuardarBorrador,
   onPublicar,
   onDespublicar,
+  guardando,
 }: {
   informe: Informe;
   onChange: (patch: Partial<Informe>) => void;
   onGuardarBorrador: () => void;
   onPublicar: () => void;
   onDespublicar: () => void;
+  guardando: boolean;
 }) {
   const publicado = informe.estado === "publicado";
   const uid = useId();
 
+  const comioCheck = (comida: EstadoAlimento | null) => comida === "completo";
+  const setComio = (
+    campo: "desayuno" | "almuerzo" | "once",
+    checked: boolean,
+  ) => {
+    onChange({ [campo]: (checked ? "completo" : "no_comio") } as Partial<Informe>);
+  };
+
   return (
     <div className="space-y-5 border-t pt-4">
-      {/* Alimentación */}
       <section>
         <div className="mb-2 flex items-center gap-2">
           <RiRestaurantLine className="text-muted-foreground size-4" />
@@ -378,15 +438,8 @@ function InformeForm({
               className="flex cursor-pointer items-center gap-2 text-sm capitalize"
             >
               <Checkbox
-                checked={informe.alimentacion[comida]}
-                onCheckedChange={(v) =>
-                  onChange({
-                    alimentacion: {
-                      ...informe.alimentacion,
-                      [comida]: Boolean(v),
-                    },
-                  })
-                }
+                checked={comioCheck(informe[comida])}
+                onCheckedChange={(v) => setComio(comida, Boolean(v))}
                 disabled={publicado}
               />
               {comida}
@@ -396,7 +449,6 @@ function InformeForm({
       </section>
 
       <div className="flex items-center justify-between gap-5">
-        {/* Siesta */}
         <section className="w-1/2">
           <div className="mb-2 flex items-center gap-2">
             <RiMoonLine className="text-muted-foreground size-4" />
@@ -410,8 +462,10 @@ function InformeForm({
               <Input
                 id={`${uid}-siesta-inicio`}
                 type="time"
-                value={informe.siestaInicio}
-                onChange={(e) => onChange({ siestaInicio: e.target.value })}
+                value={informe.siestaInicio ?? ""}
+                onChange={(e) =>
+                  onChange({ siestaInicio: e.target.value || null })
+                }
                 disabled={publicado}
               />
             </div>
@@ -422,15 +476,16 @@ function InformeForm({
               <Input
                 id={`${uid}-siesta-fin`}
                 type="time"
-                value={informe.siestaFin}
-                onChange={(e) => onChange({ siestaFin: e.target.value })}
+                value={informe.siestaFin ?? ""}
+                onChange={(e) =>
+                  onChange({ siestaFin: e.target.value || null })
+                }
                 disabled={publicado}
               />
             </div>
           </div>
         </section>
 
-        {/* Mudas */}
         <section>
           <Label className="mb-2 mt-4 block text-sm font-semibold">
             Mudas / baño
@@ -439,15 +494,16 @@ function InformeForm({
             type="number"
             min={0}
             max={10}
-            value={informe.mudas}
-            onChange={(e) => onChange({ mudas: Number(e.target.value) || 0 })}
+            value={informe.panalCambios ?? 0}
+            onChange={(e) =>
+              onChange({ panalCambios: Number(e.target.value) || 0 })
+            }
             disabled={publicado}
             className="w-[150px]"
           />
         </section>
       </div>
 
-      {/* Estado de ánimo */}
       <section>
         <Label className="mb-2 block text-sm font-semibold">
           Estado de ánimo
@@ -486,7 +542,6 @@ function InformeForm({
         </div>
       </section>
 
-      {/* Actividades */}
       <section>
         <Label
           htmlFor={`${uid}-actividades`}
@@ -496,15 +551,14 @@ function InformeForm({
         </Label>
         <Textarea
           id={`${uid}-actividades`}
-          value={informe.actividades}
-          onChange={(e) => onChange({ actividades: e.target.value })}
+          value={informe.actividades ?? ""}
+          onChange={(e) => onChange({ actividades: e.target.value || null })}
           placeholder="Describe brevemente las actividades del día…"
           rows={3}
           disabled={publicado}
         />
       </section>
 
-      {/* Observaciones */}
       <section>
         <Label
           htmlFor={`${uid}-observaciones`}
@@ -514,15 +568,16 @@ function InformeForm({
         </Label>
         <Textarea
           id={`${uid}-observaciones`}
-          value={informe.observaciones}
-          onChange={(e) => onChange({ observaciones: e.target.value })}
+          value={informe.observaciones ?? ""}
+          onChange={(e) =>
+            onChange({ observaciones: e.target.value || null })
+          }
           placeholder="Comentarios adicionales para el apoderado…"
           rows={3}
           disabled={publicado}
         />
       </section>
 
-      {/* Foto */}
       <section>
         <Label className="mb-2 block text-sm font-semibold">Foto del día</Label>
         {informe.fotoCargada ? (
@@ -566,10 +621,14 @@ function InformeForm({
         )}
       </section>
 
-      {/* Acciones */}
       <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
         {publicado ? (
-          <Button variant="outline" onClick={onDespublicar} className="gap-1.5">
+          <Button
+            variant="outline"
+            onClick={onDespublicar}
+            className="gap-1.5"
+            disabled={guardando}
+          >
             <RiDraftLine className="size-4" />
             Despublicar para corrección
           </Button>
@@ -579,11 +638,16 @@ function InformeForm({
               variant="outline"
               onClick={onGuardarBorrador}
               className="gap-1.5"
+              disabled={guardando}
             >
               <RiDraftLine className="size-4" />
               Guardar borrador
             </Button>
-            <Button onClick={onPublicar} className="gap-1.5">
+            <Button
+              onClick={onPublicar}
+              className="gap-1.5"
+              disabled={guardando}
+            >
               <RiSendPlaneFill className="size-4" />
               Publicar informe
             </Button>
@@ -593,8 +657,6 @@ function InformeForm({
     </div>
   );
 }
-
-/* ---------- Botón de ánimo ---------- */
 
 function AnimoButton({
   animo,
@@ -606,9 +668,9 @@ function AnimoButton({
   label,
   color,
 }: {
-  animo: Exclude<Animo, "">;
-  actual: Animo;
-  onClick: (v: Animo) => void;
+  animo: AnimoNino;
+  actual: AnimoNino | null;
+  onClick: (v: AnimoNino | null) => void;
   disabled: boolean;
   Icon: React.ComponentType<{ className?: string }>;
   IconFill: React.ComponentType<{ className?: string }>;
@@ -627,7 +689,7 @@ function AnimoButton({
   return (
     <button
       type="button"
-      onClick={() => onClick(activo ? "" : animo)}
+      onClick={() => onClick(activo ? null : animo)}
       disabled={disabled}
       className={cn(
         "hover:bg-muted/50 flex flex-1 flex-col items-center gap-1 rounded-lg border-2 px-3 py-3 transition-colors disabled:cursor-not-allowed disabled:opacity-60",
@@ -641,20 +703,20 @@ function AnimoButton({
   );
 }
 
-/* ---------- Stat card local ---------- */
-
 function EstadoCard({
   label,
   value,
   hint,
   color,
   icon: Icon,
+  loading,
 }: {
   label: string;
   value: number;
   hint: string;
   color: "amber" | "sky" | "emerald";
   icon: React.ComponentType<{ className?: string }>;
+  loading: boolean;
 }) {
   const styles: Record<typeof color, string> = {
     amber:
@@ -669,9 +731,13 @@ function EstadoCard({
       <CardContent className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <p className="text-muted-foreground text-sm font-medium">{label}</p>
-          <p className="font-heading text-3xl font-semibold tracking-tight">
-            {value}
-          </p>
+          {loading ? (
+            <Skeleton className="h-9 w-12" />
+          ) : (
+            <p className="font-heading text-3xl font-semibold tracking-tight">
+              {value}
+            </p>
+          )}
           <p className="text-muted-foreground text-xs">{hint}</p>
         </div>
         <div

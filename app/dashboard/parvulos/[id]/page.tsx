@@ -32,6 +32,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tabs,
   TabsContent,
@@ -39,34 +40,67 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import {
-  calcularEdad,
-  diasHastaCumple,
-  inicialesDe,
-  ninos,
-  obtenerFicha,
-} from "@/lib/data/mock";
+import { calcularEdad, diasHastaCumple, inicialesDe } from "@/lib/utils/nino";
+import { useState } from "react";
+import { useDbContext } from "@/lib/db/provider";
+import { useDbQuery } from "@/lib/db/use-db-query";
+import { useSesion } from "@/lib/db/sesion-context";
+import { getFichaCompleta } from "@/lib/db/repositories/ninos";
+import { generarFichaParvulo } from "@/lib/reports";
+import type { Persona } from "@/lib/db/types";
 
 export default function ParvuloDetallePage() {
   const params = useParams<{ id: string }>();
   const ninoId = Number(params.id);
-  const nino = ninos.find((n) => n.id === ninoId);
+  const dbCtx = useDbContext();
+  const { centroActivo, usuario, nowDemo } = useSesion();
+  const [exportandoPdf, setExportandoPdf] = useState(false);
 
-  if (!nino) notFound();
+  const fichaQuery = useDbQuery(
+    (db) =>
+      Number.isFinite(ninoId)
+        ? getFichaCompleta(db, ninoId)
+        : Promise.resolve(null),
+    [ninoId],
+  );
 
-  const ficha = obtenerFicha(nino.id);
-  const edad = calcularEdad(nino.fechaNacimiento);
-  const dias = diasHastaCumple(nino.fechaNacimiento);
+  if (fichaQuery.loading) return <DetalleSkeleton />;
+
+  if (!fichaQuery.loading && !fichaQuery.data) {
+    notFound();
+  }
+
+  const data = fichaQuery.data!;
+  const { nino, ficha, autorizadosRetiro, contactosEmergencia, entrevistas, documentos } = data;
+  const edad = calcularEdad(nino.fechaNacimiento, nowDemo);
+  const dias = diasHastaCumple(nino.fechaNacimiento, nowDemo);
   const fechaNac = new Date(nino.fechaNacimiento);
 
-  const exportar = (tipo: "PDF" | "Excel") =>
-    toast.info(`Exportando ficha a ${tipo}…`, {
-      description: "El archivo se descargará en breve.",
+  const exportarPdf = async () => {
+    if (dbCtx.status !== "ready") return;
+    setExportandoPdf(true);
+    try {
+      const nombre = await generarFichaParvulo(
+        { db: dbCtx.db, centro: centroActivo, usuario },
+        nino.id,
+      );
+      toast.success("Ficha exportada", { description: nombre });
+    } catch (e) {
+      toast.error("No se pudo generar el PDF", {
+        description: e instanceof Error ? e.message : undefined,
+      });
+    } finally {
+      setExportandoPdf(false);
+    }
+  };
+
+  const exportarExcel = () =>
+    toast.info("Exportar a Excel", {
+      description: "Disponible en la versión final.",
     });
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Breadcrumb / volver */}
       <div>
         <Button variant="ghost" size="sm" asChild className="gap-1.5 -ml-2">
           <Link href="/dashboard/parvulos">
@@ -76,7 +110,6 @@ export default function ParvuloDetallePage() {
         </Button>
       </div>
 
-      {/* Header de la ficha */}
       <Card>
         <CardContent className="flex flex-col gap-6 p-6 md:flex-row md:items-center">
           <div className="relative shrink-0">
@@ -106,7 +139,7 @@ export default function ParvuloDetallePage() {
             <div className="flex flex-wrap gap-2">
               <Badge variant="secondary" className="gap-1">
                 <RiUserSmileLine className="size-3" />
-                {nino.sala}
+                {nino.salaNombre}
               </Badge>
               <Badge
                 variant="outline"
@@ -147,16 +180,17 @@ export default function ParvuloDetallePage() {
               variant="outline"
               size="sm"
               className="gap-1.5"
-              onClick={() => exportar("PDF")}
+              onClick={() => void exportarPdf()}
+              disabled={exportandoPdf}
             >
               <RiFilePdfLine className="size-4" />
-              Exportar PDF
+              {exportandoPdf ? "Generando…" : "Exportar PDF"}
             </Button>
             <Button
               variant="outline"
               size="sm"
               className="gap-1.5"
-              onClick={() => exportar("Excel")}
+              onClick={exportarExcel}
             >
               <RiFileExcel2Line className="size-4" />
               Exportar Excel
@@ -165,7 +199,6 @@ export default function ParvuloDetallePage() {
         </CardContent>
       </Card>
 
-      {/* Tabs de contenido */}
       <Tabs defaultValue="personales">
         <ScrollArea className="w-full whitespace-nowrap">
           <TabsList className="w-max justify-start">
@@ -193,28 +226,29 @@ export default function ParvuloDetallePage() {
           <ScrollBar orientation="horizontal" className="h-1.5" />
         </ScrollArea>
 
-        {/* Datos personales */}
         <TabsContent value="personales" className="mt-4">
           <Card>
             <CardHeader>
               <CardTitle className="font-heading">Datos personales</CardTitle>
-              <CardDescription>
-                Información básica del párvulo
-              </CardDescription>
+              <CardDescription>Información básica del párvulo</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
               <Dato label="Nombre completo" valor={`${nino.nombre} ${nino.apellido}`} />
-              <Dato label="RUT" valor={ficha.rut} />
+              <Dato label="RUT" valor={nino.rut ?? "—"} />
               <Dato
                 label="Fecha de nacimiento"
                 valor={format(fechaNac, "d 'de' MMMM 'de' yyyy", { locale: es })}
               />
               <Dato label="Edad" valor={edad.texto} />
-              <Dato label="Nacionalidad" valor={ficha.nacionalidad} />
-              <Dato label="Grupo sanguíneo" valor={ficha.grupoSanguineo} />
+              <Dato label="Nacionalidad" valor={nino.nacionalidad ?? "—"} />
+              <Dato label="Grupo sanguíneo" valor={nino.grupoSanguineo ?? "—"} />
               <Dato
                 label="Dirección"
-                valor={`${ficha.direccion}, ${ficha.comuna}`}
+                valor={
+                  nino.direccion
+                    ? `${nino.direccion}${nino.comuna ? `, ${nino.comuna}` : ""}`
+                    : "Sin dirección registrada"
+                }
                 icon={RiMapPin2Line}
                 full
               />
@@ -222,7 +256,6 @@ export default function ParvuloDetallePage() {
           </Card>
         </TabsContent>
 
-        {/* Salud */}
         <TabsContent value="salud" className="mt-4">
           <Card>
             <CardHeader>
@@ -235,7 +268,7 @@ export default function ParvuloDetallePage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <Dato
                   label="Previsión de salud"
-                  valor={ficha.prevision}
+                  valor={ficha.prevision ?? "—"}
                   icon={RiShieldCheckLine}
                 />
                 <Dato
@@ -304,7 +337,6 @@ export default function ParvuloDetallePage() {
           </Card>
         </TabsContent>
 
-        {/* Familia */}
         <TabsContent value="familia" className="mt-4">
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
@@ -314,15 +346,15 @@ export default function ParvuloDetallePage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Dato label="Vive con" valor={ficha.viveCon} />
+                <Dato label="Vive con" valor={ficha.viveCon ?? "—"} />
                 <Dato
                   label="Ocupación madre"
-                  valor={ficha.ocupacionMadre}
+                  valor={ficha.ocupacionMadre ?? "—"}
                   icon={RiBriefcaseLine}
                 />
                 <Dato
                   label="Ocupación padre"
-                  valor={ficha.ocupacionPadre}
+                  valor={ficha.ocupacionPadre ?? "—"}
                   icon={RiBriefcaseLine}
                 />
               </CardContent>
@@ -338,9 +370,15 @@ export default function ParvuloDetallePage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                {ficha.autorizadosRetiro.map((p) => (
-                  <PersonaItem key={p.nombre} persona={p} />
-                ))}
+                {autorizadosRetiro.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">
+                    Sin personas autorizadas registradas
+                  </p>
+                ) : (
+                  autorizadosRetiro.map((p, i) => (
+                    <PersonaItem key={`${p.nombre}-${i}`} persona={p} />
+                  ))
+                )}
               </CardContent>
             </Card>
 
@@ -351,15 +389,20 @@ export default function ParvuloDetallePage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {ficha.contactosEmergencia.map((p) => (
-                  <PersonaItem key={p.nombre} persona={p} />
-                ))}
+                {contactosEmergencia.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">
+                    Sin contactos de emergencia registrados
+                  </p>
+                ) : (
+                  contactosEmergencia.map((p, i) => (
+                    <PersonaItem key={`${p.nombre}-${i}`} persona={p} />
+                  ))
+                )}
               </CardContent>
             </Card>
           </div>
         </TabsContent>
 
-        {/* Educación */}
         <TabsContent value="educacion" className="mt-4">
           <Card>
             <CardHeader>
@@ -375,25 +418,28 @@ export default function ParvuloDetallePage() {
                 <p className="text-muted-foreground mb-1 text-xs font-medium uppercase tracking-wide">
                   Periodo de adaptación
                 </p>
-                <p className="text-sm">{ficha.periodoAdaptacion}</p>
+                <p className="text-sm">{ficha.periodoAdaptacion ?? "Sin registro"}</p>
               </div>
               <div>
                 <p className="text-muted-foreground mb-1 text-xs font-medium uppercase tracking-wide">
                   Observaciones generales
                 </p>
-                <p className="text-sm leading-relaxed">{ficha.observaciones}</p>
+                <p className="text-sm leading-relaxed">
+                  {ficha.observaciones ?? "Sin observaciones"}
+                </p>
               </div>
               <div>
                 <p className="text-muted-foreground mb-1 text-xs font-medium uppercase tracking-wide">
                   Convivencia escolar
                 </p>
-                <p className="text-sm leading-relaxed">{ficha.convivencia}</p>
+                <p className="text-sm leading-relaxed">
+                  {ficha.convivencia ?? "Sin registro"}
+                </p>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* Documentos */}
         <TabsContent value="documentos" className="mt-4">
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
@@ -403,36 +449,36 @@ export default function ParvuloDetallePage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {ficha.documentos.map((doc) => (
-                  <div
-                    key={doc.nombre}
-                    className="hover:bg-muted/50 flex items-center gap-3 rounded-lg border p-3 transition-colors"
-                  >
-                    <div className="bg-rose-100 text-rose-700 flex size-9 items-center justify-center rounded-lg dark:bg-rose-950/40 dark:text-rose-400">
-                      <RiFilePdfLine className="size-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">
-                        {doc.nombre}
-                      </p>
-                      <p className="text-muted-foreground text-xs">
-                        {format(new Date(doc.fecha), "d MMM yyyy", {
-                          locale: es,
-                        })}
-                      </p>
-                    </div>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() =>
-                        toast.info(`Descargando ${doc.nombre}`)
-                      }
-                      aria-label={`Descargar ${doc.nombre}`}
+                {documentos.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">
+                    Sin documentos adjuntos
+                  </p>
+                ) : (
+                  documentos.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="hover:bg-muted/50 flex items-center gap-3 rounded-lg border p-3 transition-colors"
                     >
-                      <RiDownloadLine className="size-4" />
-                    </Button>
-                  </div>
-                ))}
+                      <div className="bg-rose-100 text-rose-700 flex size-9 items-center justify-center rounded-lg dark:bg-rose-950/40 dark:text-rose-400">
+                        <RiFilePdfLine className="size-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{doc.nombre}</p>
+                        <p className="text-muted-foreground text-xs">
+                          {format(new Date(doc.fecha), "d MMM yyyy", { locale: es })}
+                        </p>
+                      </div>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => toast.info(`Descargando ${doc.nombre}`)}
+                        aria-label={`Descargar ${doc.nombre}`}
+                      >
+                        <RiDownloadLine className="size-4" />
+                      </Button>
+                    </div>
+                  ))
+                )}
               </CardContent>
             </Card>
 
@@ -443,38 +489,44 @@ export default function ParvuloDetallePage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {ficha.entrevistas.map((e) => (
-                  <div
-                    key={e.titulo}
-                    className="flex items-start gap-3 rounded-lg border p-3"
-                  >
+                {entrevistas.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">
+                    Sin entrevistas registradas
+                  </p>
+                ) : (
+                  entrevistas.map((e) => (
                     <div
-                      className={cn(
-                        "mt-0.5 size-2 shrink-0 rounded-full",
-                        e.realizada ? "bg-emerald-500" : "bg-muted-foreground/40",
-                      )}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">{e.titulo}</p>
-                      <p className="text-muted-foreground text-xs">
-                        {format(new Date(e.fecha), "d 'de' MMMM, yyyy", {
-                          locale: es,
-                        })}
-                      </p>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "text-xs",
-                        e.realizada
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-400"
-                          : "border-muted-foreground/20 text-muted-foreground",
-                      )}
+                      key={e.id}
+                      className="flex items-start gap-3 rounded-lg border p-3"
                     >
-                      {e.realizada ? "Realizada" : "Programada"}
-                    </Badge>
-                  </div>
-                ))}
+                      <div
+                        className={cn(
+                          "mt-0.5 size-2 shrink-0 rounded-full",
+                          e.realizada ? "bg-emerald-500" : "bg-muted-foreground/40",
+                        )}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">{e.titulo}</p>
+                        <p className="text-muted-foreground text-xs">
+                          {format(new Date(e.fecha), "d 'de' MMMM, yyyy", {
+                            locale: es,
+                          })}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-xs",
+                          e.realizada
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-400"
+                            : "border-muted-foreground/20 text-muted-foreground",
+                        )}
+                      >
+                        {e.realizada ? "Realizada" : "Programada"}
+                      </Badge>
+                    </div>
+                  ))
+                )}
               </CardContent>
             </Card>
           </div>
@@ -483,8 +535,6 @@ export default function ParvuloDetallePage() {
     </div>
   );
 }
-
-/* ---------- Subcomponentes ---------- */
 
 function Dato({
   label,
@@ -510,11 +560,7 @@ function Dato({
   );
 }
 
-function PersonaItem({
-  persona,
-}: {
-  persona: { nombre: string; parentesco: string; telefono: string };
-}) {
+function PersonaItem({ persona }: { persona: Persona }) {
   return (
     <div className="flex items-center gap-3 rounded-lg border p-3">
       <Avatar className="size-10 shrink-0">
@@ -534,6 +580,29 @@ function PersonaItem({
         <RiPhoneLine className="size-3" />
         <span className="hidden sm:inline">{persona.telefono}</span>
       </div>
+    </div>
+  );
+}
+
+function DetalleSkeleton() {
+  return (
+    <div className="flex flex-col gap-6">
+      <Skeleton className="h-8 w-32" />
+      <Card>
+        <CardContent className="flex flex-col gap-6 p-6 md:flex-row md:items-center">
+          <Skeleton className="size-24 rounded-full md:size-28" />
+          <div className="flex-1 space-y-3">
+            <Skeleton className="h-8 w-64" />
+            <Skeleton className="h-4 w-48" />
+            <div className="flex gap-2">
+              <Skeleton className="h-6 w-24" />
+              <Skeleton className="h-6 w-32" />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+      <Skeleton className="h-10 w-full" />
+      <Skeleton className="h-64 w-full" />
     </div>
   );
 }
