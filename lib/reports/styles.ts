@@ -1,0 +1,78 @@
+import { StyleSheet } from "@react-pdf/renderer";
+
+// Paleta de colores alineada con el demo (tonos verde/teal del primary).
+export const colors = {
+  primary: "#0d9488",
+  primaryDark: "#0f766e",
+  text: "#1f2937",
+  muted: "#6b7280",
+  border: "#e5e7eb",
+  borderDark: "#d1d5db",
+  bg: "#ffffff",
+  bgSubtle: "#f9fafb",
+  emerald: "#10b981",
+  emeraldBg: "#ecfdf5",
+  rose: "#ef4444",
+  roseBg: "#fef2f2",
+  amber: "#f59e0b",
+  amberBg: "#fffbeb",
+};
+
+export const styles = StyleSheet.create({
+  page: {
+    paddingTop: 36,
+    paddingBottom: 50,
+    paddingHorizontal: 32,
+    fontSize: 9,
+    color: colors.text,
+    fontFamily: "Helvetica",
+  },
+  pageLandscape: {
+    paddingTop: 30,
+    paddingBottom: 50,
+    paddingHorizontal: 30,
+    fontSize: 8,
+    color: colors.text,
+    fontFamily: "Helvetica",
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    borderBottomWidth: 2,
+    borderBottomColor: colors.primary,
+    paddingBottom: 10,
+    marginBottom: 18,
+  },
+  headerLeft: { flexDirection: "column" },
+  centroNombre: {
+    fontSize: 11,
+    fontFamily: "Helvetica-Bold",
+    color: colors.primary,
+    marginBottom: 2,
+  },
+  centroServicio: { fontSize: 8, color: colors.muted },
+  headerRight: { alignItems: "flex-end" },
+  fechaLabel: { fontSize: 7, color: colors.muted, textTransform: "uppercase" },
+  fechaTexto: { fontSize: 9, fontFamily: "Helvetica-Bold" },
+  titulo: {
+    fontSize: 18,
+    fontFamily: "Helvetica-Bold",
+    marginBottom: 4,
+    color: colors.text,
+  },
+  subtitulo: { fontSize: 10, color: colors.muted, marginBottom: 18 },
+  footer: {
+    position: "absolute",
+    bottom: 24,
+    left: 32,
+    right: 32,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    fontSize: 7,
+    color: colors.muted,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: 6,
+  },
+});
