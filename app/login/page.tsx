@@ -115,7 +115,7 @@ export default function LoginPage() {
           </div>
           <div className="space-y-1">
             <CardTitle className="font-heading text-2xl">
-              Semillitas del Oriente
+              Jardín Infantil Girasoles
             </CardTitle>
             <CardDescription>
               Aula · Elegí un perfil para entrar al demo
@@ -195,7 +195,7 @@ export default function LoginPage() {
           )}
 
           <p className="text-muted-foreground mt-6 text-center text-xs">
-            Servicio de Salud Metropolitano Oriente ·{" "}
+            Red Comunitaria de Jardines Infantiles ·{" "}
             <Link
               href="#"
               className="underline-offset-2 hover:underline"

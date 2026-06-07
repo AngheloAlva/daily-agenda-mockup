@@ -1,4 +1,4 @@
-// Schema de Aula (Semillitas del Oriente).
+// Schema de Aula (Jardín Infantil Girasoles).
 // Se ejecuta una sola vez al inicializar la base PGlite en el browser.
 
 export const SCHEMA_SQL = /* sql */ `
@@ -43,7 +43,7 @@ CREATE TABLE centros (
 );
 
 -- ============ Usuarios ============
--- centro_id NULL + super_admin=true => rol regional SSMO (ve todos los centros)
+-- centro_id NULL + super_admin=true => rol regional de la red (ve todos los centros)
 CREATE TABLE usuarios (
   id          SERIAL PRIMARY KEY,
   centro_id   INT REFERENCES centros(id),

@@ -6,7 +6,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { SCHEMA_SQL, SCHEMA_VERSION } from "./schema";
 import { seedDatabase } from "./seed";
 
-const IDB_NAME = "semillitas-agenda";
+const IDB_NAME = "girasoles-agenda";
 const META_KEY = "schema_version";
 
 let instance: PGlite | null = null;

@@ -1,7 +1,8 @@
-# Aula — Semillitas del Oriente
+# Aula — Jardín Infantil Girasoles
 
-Demo navegable de la plataforma de gestión y comunicación para el Centro
-Infantil "Semillitas del Oriente" (Servicio de Salud Metropolitano Oriente).
+Demo navegable de la plataforma de gestión y comunicación para el Jardín
+Infantil "Girasoles", un centro ficticio de la Red Comunitaria de Jardines
+Infantiles.
 
 **Vive 100% en el navegador.** No hay servidor: Postgres corre dentro del
 browser vía WASM y todos los datos persisten en IndexedDB del visitante.
@@ -66,7 +67,7 @@ components/
 ## Reset del demo
 
 Botón refresh en el header. Borra el IndexedDB y re-aplica el seed.
-El usuario activo vuelve a ser Angélica Fica (directora de Semillitas).
+El usuario activo vuelve a ser Angélica Fica (directora de Girasoles).
 
 ## Notas
 

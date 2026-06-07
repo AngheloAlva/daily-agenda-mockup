@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     template: "%s · Aula",
   },
   description:
-    "Plataforma de gestión y comunicación del Centro Infantil Semillitas del Oriente.",
+    "Plataforma de gestión y comunicación del Jardín Infantil Girasoles.",
 };
 
 export default function RootLayout({

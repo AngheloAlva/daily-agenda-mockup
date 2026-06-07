@@ -1,5 +1,5 @@
 // Seed inicial de la base PGlite.
-// Reproduce el mock existente (Semillitas del Oriente) + un segundo centro
+// Reproduce el mock existente (Jardín Infantil Girasoles) + un segundo centro
 // para mostrar la capacidad multi-jardín del demo.
 
 import type { PGlite, Transaction } from "@electric-sql/pglite";
@@ -8,34 +8,34 @@ type Tx = Transaction | PGlite;
 
 export async function seedDatabase(db: PGlite): Promise<void> {
   await db.transaction(async (tx) => {
-    const { centroSemillitas, centroBrotitos } = await seedCentros(tx);
-    const usuarios = await seedUsuarios(tx, { centroSemillitas, centroBrotitos });
-    const salas = await seedSalas(tx, { centroSemillitas, centroBrotitos, usuarios });
-    const ninos = await seedNinos(tx, { centroSemillitas, centroBrotitos, salas, usuarios });
+    const { centroGirasoles, centroBrotitos } = await seedCentros(tx);
+    const usuarios = await seedUsuarios(tx, { centroGirasoles, centroBrotitos });
+    const salas = await seedSalas(tx, { centroGirasoles, centroBrotitos, usuarios });
+    const ninos = await seedNinos(tx, { centroGirasoles, centroBrotitos, salas, usuarios });
     await seedFichas(tx, ninos);
     await seedAsistenciaHistorica(tx, ninos, usuarios);
     await seedInformesDiarios(tx, ninos, usuarios);
-    await seedPlanificaciones(tx, { centroSemillitas, salas, usuarios });
+    await seedPlanificaciones(tx, { centroGirasoles, salas, usuarios });
     await seedMensajeria(tx, usuarios, ninos);
-    await seedEventos(tx, { centroSemillitas, centroBrotitos, usuarios, salas });
-    await seedMural(tx, { centroSemillitas, usuarios });
-    await seedDocumentosInstitucionales(tx, { centroSemillitas, centroBrotitos });
-    await seedActividades(tx, { centroSemillitas, usuarios });
+    await seedEventos(tx, { centroGirasoles, centroBrotitos, usuarios, salas });
+    await seedMural(tx, { centroGirasoles, usuarios });
+    await seedDocumentosInstitucionales(tx, { centroGirasoles, centroBrotitos });
+    await seedActividades(tx, { centroGirasoles, usuarios });
     await seedNotificaciones(tx, usuarios);
-    await seedSesion(tx, { usuarios, centroSemillitas });
+    await seedSesion(tx, { usuarios, centroGirasoles });
   });
 }
 
 /* ============ Centros ============ */
 
 async function seedCentros(tx: Tx) {
-  const semillitas = await tx.query<{ id: number }>(
+  const girasoles = await tx.query<{ id: number }>(
     `INSERT INTO centros (nombre, codigo, servicio, direccion, comuna, telefono, color_tema)
      VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
     [
-      "Centro Infantil Semillitas del Oriente",
-      "semillitas-oriente",
-      "Servicio de Salud Metropolitano Oriente",
+      "Jardín Infantil Girasoles",
+      "girasoles",
+      "Red Comunitaria de Jardines Infantiles",
       "Av. Salvador 364",
       "Providencia",
       "+56 2 2575 5000",
@@ -48,7 +48,7 @@ async function seedCentros(tx: Tx) {
     [
       "Centro Infantil Brotitos del Maipo",
       "brotitos-maipo",
-      "Servicio de Salud Metropolitano Oriente",
+      "Red Comunitaria de Jardines Infantiles",
       "Av. Las Condes 8120",
       "Las Condes",
       "+56 2 2333 4400",
@@ -56,7 +56,7 @@ async function seedCentros(tx: Tx) {
     ],
   );
   return {
-    centroSemillitas: semillitas.rows[0].id,
+    centroGirasoles: girasoles.rows[0].id,
     centroBrotitos: brotitos.rows[0].id,
   };
 }
@@ -66,12 +66,12 @@ async function seedCentros(tx: Tx) {
 type UsuariosSeed = {
   // Regional / super admin
   directoraRegional: number;
-  // Semillitas
+  // Girasoles
   angelica: number;
   mariaGonzalez: number;
   claudiaRamirez: number;
   patriciaNunez: number;
-  // Apoderados Semillitas (subset clave)
+  // Apoderados Girasoles (subset clave)
   carolinaVera: number;
   andreaDiaz: number;
   camilaSoto: number;
@@ -125,56 +125,56 @@ async function insertUsuario(
 
 async function seedUsuarios(
   tx: Tx,
-  { centroSemillitas, centroBrotitos }: { centroSemillitas: number; centroBrotitos: number },
+  { centroGirasoles, centroBrotitos }: { centroGirasoles: number; centroBrotitos: number },
 ): Promise<UsuariosSeed> {
   const directoraRegional = await insertUsuario(tx, {
     centroId: null,
     nombre: "Patricia",
     apellido: "Morales Carrasco",
-    email: "pmorales@ssmoriente.cl",
+    email: "pmorales@jigirasoles.cl",
     rol: "directora",
-    cargo: "Coordinadora Regional SSMO",
+    cargo: "Coordinadora Regional de la Red",
     superAdmin: true,
   });
 
-  // Semillitas
+  // Girasoles
   const angelica = await insertUsuario(tx, {
-    centroId: centroSemillitas,
+    centroId: centroGirasoles,
     nombre: "Angélica",
     apellido: "Fica Masías",
-    email: "afica@ssmoriente.cl",
+    email: "afica@jigirasoles.cl",
     rol: "directora",
     cargo: "Jefa Centro Infantil",
   });
   const mariaGonzalez = await insertUsuario(tx, {
-    centroId: centroSemillitas,
+    centroId: centroGirasoles,
     nombre: "María",
     apellido: "González",
-    email: "mgonzalez@ssmoriente.cl",
+    email: "mgonzalez@jigirasoles.cl",
     rol: "docente",
     cargo: "Educadora · Sala Cuna Mayor",
   });
   const claudiaRamirez = await insertUsuario(tx, {
-    centroId: centroSemillitas,
+    centroId: centroGirasoles,
     nombre: "Claudia",
     apellido: "Ramírez",
-    email: "cramirez@ssmoriente.cl",
+    email: "cramirez@jigirasoles.cl",
     rol: "docente",
     cargo: "Educadora · Medio Menor",
   });
   const patriciaNunez = await insertUsuario(tx, {
-    centroId: centroSemillitas,
+    centroId: centroGirasoles,
     nombre: "Patricia",
     apellido: "Núñez",
-    email: "pnunez@ssmoriente.cl",
+    email: "pnunez@jigirasoles.cl",
     rol: "docente",
     cargo: "Educadora · Medio Mayor",
   });
 
-  // Apoderados Semillitas
+  // Apoderados Girasoles
   const apod = async (nombre: string, apellido: string, telefono: string) =>
     insertUsuario(tx, {
-      centroId: centroSemillitas,
+      centroId: centroGirasoles,
       nombre,
       apellido,
       telefono,
@@ -200,7 +200,7 @@ async function seedUsuarios(
     centroId: centroBrotitos,
     nombre: "Verónica",
     apellido: "Salazar",
-    email: "vsalazar@ssmoriente.cl",
+    email: "vsalazar@jigirasoles.cl",
     rol: "directora",
     cargo: "Jefa Centro Infantil",
   });
@@ -208,7 +208,7 @@ async function seedUsuarios(
     centroId: centroBrotitos,
     nombre: "Ximena",
     apellido: "Oyarzún",
-    email: "xoyarzun@ssmoriente.cl",
+    email: "xoyarzun@jigirasoles.cl",
     rol: "docente",
     cargo: "Educadora · Sala Cuna",
   });
@@ -267,11 +267,11 @@ type SalasSeed = {
 async function seedSalas(
   tx: Tx,
   {
-    centroSemillitas,
+    centroGirasoles,
     centroBrotitos,
     usuarios,
   }: {
-    centroSemillitas: number;
+    centroGirasoles: number;
     centroBrotitos: number;
     usuarios: UsuariosSeed;
   },
@@ -291,9 +291,9 @@ async function seedSalas(
   };
 
   return {
-    salaCunaMayor: await insert(centroSemillitas, "Sala Cuna Mayor", usuarios.mariaGonzalez, 20),
-    medioMenor: await insert(centroSemillitas, "Medio Menor", usuarios.claudiaRamirez, 25),
-    medioMayor: await insert(centroSemillitas, "Medio Mayor", usuarios.patriciaNunez, 25),
+    salaCunaMayor: await insert(centroGirasoles, "Sala Cuna Mayor", usuarios.mariaGonzalez, 20),
+    medioMenor: await insert(centroGirasoles, "Medio Menor", usuarios.claudiaRamirez, 25),
+    medioMayor: await insert(centroGirasoles, "Medio Mayor", usuarios.patriciaNunez, 25),
     brotitosSalaCuna: await insert(centroBrotitos, "Sala Cuna", usuarios.educadoraBrotitos, 18),
     brotitosMedio: await insert(centroBrotitos, "Medio", usuarios.educadoraBrotitos, 22),
   };
@@ -314,12 +314,12 @@ type NinoData = {
 async function seedNinos(
   tx: Tx,
   {
-    centroSemillitas,
+    centroGirasoles,
     centroBrotitos,
     salas,
     usuarios,
   }: {
-    centroSemillitas: number;
+    centroGirasoles: number;
     centroBrotitos: number;
     salas: SalasSeed;
     usuarios: UsuariosSeed;
@@ -349,7 +349,7 @@ async function seedNinos(
     );
   };
 
-  // Semillitas — 15 niños del mock original
+  // Girasoles — 15 niños del mock original
   const definiciones: Array<{
     nombre: string;
     apellido: string;
@@ -378,11 +378,11 @@ async function seedNinos(
 
   const ninos: NinoData[] = [];
   for (const d of definiciones) {
-    const id = await insertNino(centroSemillitas, d.nombre, d.apellido, d.sala, d.fn, d.estado);
+    const id = await insertNino(centroGirasoles, d.nombre, d.apellido, d.sala, d.fn, d.estado);
     await link(id, d.apod, "Madre", true);
     ninos.push({
       id,
-      centroId: centroSemillitas,
+      centroId: centroGirasoles,
       salaId: d.sala,
       apoderadoPrincipal: d.apod,
       fechaNacimiento: d.fn,
@@ -538,7 +538,7 @@ async function seedAsistenciaHistorica(
   }
   fechas.push(hoy.toISOString().slice(0, 10));
 
-  // Estados "hoy" del mock original — solo aplican a niños 1-15 (Semillitas)
+  // Estados "hoy" del mock original — solo aplican a niños 1-15 (Girasoles)
   const estadosHoy: Record<number, "presente" | "ausente" | "atrasado"> = {
     1: "presente", 2: "presente", 3: "ausente", 4: "presente", 5: "presente",
     6: "atrasado", 7: "presente", 8: "presente", 9: "presente", 10: "ausente",
@@ -666,11 +666,11 @@ async function seedInformesDiarios(
 async function seedPlanificaciones(
   tx: Tx,
   {
-    centroSemillitas,
+    centroGirasoles,
     salas,
     usuarios,
   }: {
-    centroSemillitas: number;
+    centroGirasoles: number;
     salas: SalasSeed;
     usuarios: UsuariosSeed;
   },
@@ -680,7 +680,7 @@ async function seedPlanificaciones(
       (centro_id, sala_id, titulo, periodo_inicio, periodo_fin, ambito, objetivo_general, estado, autor_id, aprobada_por)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
     [
-      centroSemillitas,
+      centroGirasoles,
       salas.salaCunaMayor,
       "Abril 2026 — Mi cuerpo y mis emociones",
       "2026-04-01",
@@ -698,7 +698,7 @@ async function seedPlanificaciones(
       (centro_id, sala_id, titulo, periodo_inicio, periodo_fin, ambito, objetivo_general, estado, autor_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
     [
-      centroSemillitas,
+      centroGirasoles,
       salas.medioMenor,
       "Abril 2026 — Exploramos el huerto",
       "2026-04-01",
@@ -857,12 +857,12 @@ async function seedMensajeria(
 async function seedEventos(
   tx: Tx,
   {
-    centroSemillitas,
+    centroGirasoles,
     centroBrotitos,
     usuarios,
     salas,
   }: {
-    centroSemillitas: number;
+    centroGirasoles: number;
     centroBrotitos: number;
     usuarios: UsuariosSeed;
     salas: SalasSeed;
@@ -887,7 +887,7 @@ async function seedEventos(
     ["Navidad", "Feriado religioso", "2026-12-25"],
   ];
   // Los feriados aplican a ambos centros (los repetimos)
-  for (const centroId of [centroSemillitas, centroBrotitos]) {
+  for (const centroId of [centroGirasoles, centroBrotitos]) {
     for (const [titulo, descripcion, fecha] of feriados) {
       await tx.query(
         `INSERT INTO eventos (centro_id, titulo, descripcion, fecha, tipo)
@@ -897,7 +897,7 @@ async function seedEventos(
     }
   }
 
-  // Eventos del centro Semillitas
+  // Eventos del centro Girasoles
   const eventos: Array<{
     titulo: string;
     descripcion: string;
@@ -911,7 +911,7 @@ async function seedEventos(
     recordatorio?: boolean;
   }> = [
     { titulo: "Reunión equipo docente", descripcion: "Revisión de planificación semanal y coordinación de actividades.", fecha: "2026-04-13", horaInicio: "08:30", horaFin: "09:30", tipo: "reunion", modalidad: "presencial", ubicacion: "Sala de reuniones", recordatorio: true },
-    { titulo: "Reunión con Dirección SSMO", descripcion: "Revisión de indicadores trimestrales del centro.", fecha: "2026-04-17", horaInicio: "10:00", horaFin: "11:30", tipo: "reunion", modalidad: "online", recordatorio: true },
+    { titulo: "Reunión con Dirección Regional", descripcion: "Revisión de indicadores trimestrales del centro.", fecha: "2026-04-17", horaInicio: "10:00", horaFin: "11:30", tipo: "reunion", modalidad: "online", recordatorio: true },
     { titulo: "Taller de motricidad fina", descripcion: "Actividad con plasticinas y material sensorial.", fecha: "2026-04-22", horaInicio: "10:30", horaFin: "11:30", tipo: "actividad", modalidad: "presencial", ubicacion: "Sala Cuna Mayor", alcanceSala: salas.salaCunaMayor },
     { titulo: "Celebración Día del Libro", descripcion: "Cuentacuentos con apoderados invitados y feria del libro infantil.", fecha: "2026-04-23", horaInicio: "09:30", horaFin: "11:00", tipo: "celebracion", modalidad: "presencial", ubicacion: "Salón principal" },
     { titulo: "Salida educativa: Parque Metropolitano", descripcion: "Visita guiada con la Corporación Parquemet. Transporte y colación incluidos.", fecha: "2026-04-25", horaInicio: "09:00", horaFin: "13:00", tipo: "actividad", modalidad: "presencial", ubicacion: "Parque Metropolitano", recordatorio: true },
@@ -926,7 +926,7 @@ async function seedEventos(
         (centro_id, titulo, descripcion, fecha, hora_inicio, hora_fin, tipo, modalidad, ubicacion, alcance_sala_id, recordatorio, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
-        centroSemillitas,
+        centroGirasoles,
         e.titulo,
         e.descripcion,
         e.fecha,
@@ -947,7 +947,7 @@ async function seedEventos(
 
 async function seedMural(
   tx: Tx,
-  { centroSemillitas, usuarios }: { centroSemillitas: number; usuarios: UsuariosSeed },
+  { centroGirasoles, usuarios }: { centroGirasoles: number; usuarios: UsuariosSeed },
 ): Promise<void> {
   const pub = async (
     autorId: number,
@@ -959,7 +959,7 @@ async function seedMural(
     const r = await tx.query<{ id: number }>(
       `INSERT INTO publicaciones (centro_id, autor_id, titulo, contenido, destacado, fecha)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [centroSemillitas, autorId, titulo, contenido, destacado, fecha],
+      [centroGirasoles, autorId, titulo, contenido, destacado, fecha],
     );
     return r.rows[0].id;
   };
@@ -1043,14 +1043,14 @@ async function seedMural(
 
 async function seedDocumentosInstitucionales(
   tx: Tx,
-  { centroSemillitas, centroBrotitos }: { centroSemillitas: number; centroBrotitos: number },
+  { centroGirasoles, centroBrotitos }: { centroGirasoles: number; centroBrotitos: number },
 ): Promise<void> {
   const docs = [
     { titulo: "Reglamento Interno", desc: "Normas de convivencia y funcionamiento del centro infantil", fecha: "2026-03-01", tamano: 842_000 },
     { titulo: "Plan Educativo 2026", desc: "Lineamientos pedagógicos y objetivos del año en curso", fecha: "2026-03-15", tamano: 1_300_000 },
     { titulo: "Protocolo de Emergencia", desc: "Procedimientos ante sismos, incendios y situaciones de riesgo", fecha: "2026-02-20", tamano: 567_000 },
   ];
-  for (const centroId of [centroSemillitas, centroBrotitos]) {
+  for (const centroId of [centroGirasoles, centroBrotitos]) {
     for (const d of docs) {
       await tx.query(
         `INSERT INTO documentos_institucionales
@@ -1066,7 +1066,7 @@ async function seedDocumentosInstitucionales(
 
 async function seedActividades(
   tx: Tx,
-  { centroSemillitas, usuarios }: { centroSemillitas: number; usuarios: UsuariosSeed },
+  { centroGirasoles, usuarios }: { centroGirasoles: number; usuarios: UsuariosSeed },
 ): Promise<void> {
   const actividades: Array<{
     tipo: "informe" | "mensaje" | "asistencia" | "evento";
@@ -1084,7 +1084,7 @@ async function seedActividades(
     await tx.query(
       `INSERT INTO actividades (centro_id, tipo, titulo, descripcion, usuario_id, fecha)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [centroSemillitas, a.tipo, a.titulo, a.descripcion, a.usuarioId, a.fecha],
+      [centroGirasoles, a.tipo, a.titulo, a.descripcion, a.usuarioId, a.fecha],
     );
   }
 }
@@ -1121,10 +1121,10 @@ async function seedNotificaciones(tx: Tx, usuarios: UsuariosSeed): Promise<void>
 
 async function seedSesion(
   tx: Tx,
-  { usuarios, centroSemillitas }: { usuarios: UsuariosSeed; centroSemillitas: number },
+  { usuarios, centroGirasoles }: { usuarios: UsuariosSeed; centroGirasoles: number },
 ): Promise<void> {
   await tx.query(
     `INSERT INTO sesion (id, usuario_id, centro_activo_id) VALUES (1, $1, $2)`,
-    [usuarios.angelica, centroSemillitas],
+    [usuarios.angelica, centroGirasoles],
   );
 }

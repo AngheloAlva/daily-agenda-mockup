@@ -32,7 +32,7 @@ export function AppSidebar() {
             />
             <div className="flex flex-col leading-tight group-data-[collapsible=icon]:hidden">
               <span className="font-heading text-sm font-semibold">
-                Semillitas
+                Jardín Girasoles
               </span>
               <span className="text-muted-foreground text-xs">Aula</span>
             </div>

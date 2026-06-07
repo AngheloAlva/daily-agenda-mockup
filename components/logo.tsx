@@ -26,7 +26,7 @@ export function Logo({ className, showText = true }: LogoProps) {
       {showText && (
         <div className="flex flex-col leading-tight">
           <span className="font-heading text-sm font-semibold">
-            Semillitas del Oriente
+            Jardín Girasoles
           </span>
           <span className="text-muted-foreground text-xs">Aula</span>
         </div>
