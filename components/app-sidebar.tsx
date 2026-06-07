@@ -34,9 +34,7 @@ export function AppSidebar() {
               <span className="font-heading text-sm font-semibold">
                 Semillitas
               </span>
-              <span className="text-muted-foreground text-xs">
-                Agenda Digital
-              </span>
+              <span className="text-muted-foreground text-xs">Aula</span>
             </div>
           </Link>
         </div>

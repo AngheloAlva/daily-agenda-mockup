@@ -31,7 +31,7 @@ export function PdfHeader({
 export function PdfFooter({ generadoPor }: { generadoPor: string }) {
   return (
     <View style={styles.footer} fixed>
-      <Text>Generado por {generadoPor} · Agenda Digital Semillitas</Text>
+      <Text>Generado por {generadoPor} · Aula · Semillitas del Oriente</Text>
       <Text
         render={({ pageNumber, totalPages }) =>
           `Página ${pageNumber} de ${totalPages}`

@@ -28,7 +28,7 @@ export function Logo({ className, showText = true }: LogoProps) {
           <span className="font-heading text-sm font-semibold">
             Semillitas del Oriente
           </span>
-          <span className="text-muted-foreground text-xs">Agenda Digital</span>
+          <span className="text-muted-foreground text-xs">Aula</span>
         </div>
       )}
     </div>

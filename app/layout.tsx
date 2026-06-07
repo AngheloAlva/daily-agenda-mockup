@@ -12,8 +12,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Semillitas del Oriente — Agenda Digital",
-    template: "%s · Semillitas del Oriente",
+    default: "Aula — Gestión educativa",
+    template: "%s · Aula",
   },
   description:
     "Plataforma de gestión y comunicación del Centro Infantil Semillitas del Oriente.",

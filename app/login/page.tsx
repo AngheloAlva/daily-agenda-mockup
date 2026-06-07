@@ -118,7 +118,7 @@ export default function LoginPage() {
               Semillitas del Oriente
             </CardTitle>
             <CardDescription>
-              Agenda Digital · Elegí un perfil para entrar al demo
+              Aula · Elegí un perfil para entrar al demo
             </CardDescription>
           </div>
         </CardHeader>

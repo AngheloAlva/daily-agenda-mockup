@@ -1,4 +1,4 @@
-// Schema de la Agenda Digital (Semillitas del Oriente).
+// Schema de Aula (Semillitas del Oriente).
 // Se ejecuta una sola vez al inicializar la base PGlite en el browser.
 
 export const SCHEMA_SQL = /* sql */ `

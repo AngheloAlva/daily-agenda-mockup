@@ -1,4 +1,4 @@
-# Agenda Digital — Semillitas del Oriente
+# Aula — Semillitas del Oriente
 
 Demo navegable de la plataforma de gestión y comunicación para el Centro
 Infantil "Semillitas del Oriente" (Servicio de Salud Metropolitano Oriente).
